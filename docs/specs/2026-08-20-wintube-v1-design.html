@@ -1,0 +1,408 @@
+<title>WinTube v1 Design</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5;
+    --ink: #24211E;
+    --muted: #6B645C;
+    --accent: #A63D2F;
+    --accent-ink: #FFFFFF;
+    --line: #E4DFD8;
+    --card: #FFFFFF;
+    --code-bg: #F1EDE7;
+    --good: #3D6B4F;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917;
+      --ink: #E9E4DD;
+      --muted: #A39B90;
+      --accent: #D4674F;
+      --accent-ink: #1B1917;
+      --line: #35302B;
+      --card: #242019;
+      --code-bg: #262119;
+      --good: #7FB08F;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917;
+    --ink: #E9E4DD;
+    --muted: #A39B90;
+    --accent: #D4674F;
+    --accent-ink: #1B1917;
+    --line: #35302B;
+    --card: #242019;
+    --code-bg: #262119;
+    --good: #7FB08F;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Public Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2, h3 {
+    font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif;
+    text-wrap: balance;
+    line-height: 1.2;
+  }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  h3 { font-size: 1.05rem; font-weight: 600; margin: 1.75rem 0 .5rem; }
+  p { margin: .75rem 0; }
+  a { color: var(--accent); }
+  code, pre {
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: .85em;
+  }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .eyebrow {
+    font-family: "Schibsted Grotesk", sans-serif;
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 4rem 0 .25rem;
+  }
+  header .eyebrow { margin-top: 3.5rem; }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem 1.5rem;
+    color: var(--muted);
+    font-size: .85rem;
+    margin: 1rem 0 0;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1rem 0;
+    font-size: .92rem;
+  }
+  .table-wrap { overflow-x: auto; }
+  th {
+    text-align: left;
+    font-family: "Schibsted Grotesk", sans-serif;
+    font-size: .78rem;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 2px solid var(--line);
+    padding: .4rem .75rem .4rem 0;
+  }
+  td {
+    border-bottom: 1px solid var(--line);
+    padding: .55rem .75rem .55rem 0;
+    vertical-align: top;
+  }
+  td:first-child, th:first-child { padding-left: 0; }
+  .pill {
+    display: inline-block;
+    font-family: "Schibsted Grotesk", sans-serif;
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    padding: .1rem .55rem;
+    border-radius: 99px;
+    white-space: nowrap;
+  }
+  .pill.in { background: var(--good); color: var(--bg); }
+  .pill.out { background: var(--code-bg); color: var(--muted); border: 1px solid var(--line); }
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--card);
+    border-radius: 0 8px 8px 0;
+    padding: .75rem 1.25rem;
+    margin: 1.25rem 0;
+  }
+  figure { margin: 1.5rem 0; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption { color: var(--muted); font-size: .85rem; margin-top: .5rem; }
+  .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+  ul { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Approved 2026-08-20</p>
+  <h1>WinTube v1</h1>
+  <p>A Windows desktop port of <a href="https://github.com/claust/metube">metube</a> — the personal
+  YouTube client built for Apple TV. Same InnerTube recipe, same account, same viewing model;
+  a windowed mouse-and-keyboard app instead of a 10-foot remote-driven one.</p>
+  <div class="meta">
+    <span><b>Stack</b> WinUI 3 · .NET 8 · C#</span>
+    <span><b>Shape</b> Core library + app</span>
+    <span><b>Scope</b> Core first</span>
+    <span><b>Repo</b> C:\Projects\WinTube</span>
+  </div>
+</header>
+
+<h2>1 · Goal and decisions already made</h2>
+<p>Build the core of the tvOS app as a native Windows desktop application, for the same single
+viewer. The decisions below were made during brainstorming and are settled:</p>
+<div class="table-wrap"><table>
+  <tr><th>Decision</th><th>Choice</th><th>Why</th></tr>
+  <tr><td>Form factor</td><td>Ordinary desktop app</td><td>Windowed, mouse and keyboard. Not a 10-foot UI.</td></tr>
+  <tr><td>Technology</td><td>WinUI 3 / C# (.NET 8)</td><td>Native Windows, as SwiftUI is native tvOS. <code>MediaPlayerElement</code> is the platform player.</td></tr>
+  <tr><td>Architecture</td><td><code>WinTube.Core</code> + <code>WinTube.App</code></td><td>InnerTube parsing and auth are the fragile parts — they live in a UI-free, unit-testable library.</td></tr>
+  <tr><td>InnerTube layer</td><td>Ported by hand from <code>reference/INNERTUBE.md</code></td><td>The recipe is already distilled and live-verified; a third-party NuGet uses different clients and no device-flow auth.</td></tr>
+</table></div>
+
+<h2>2 · Scope of v1</h2>
+<div class="table-wrap"><table>
+  <tr><th>Feature</th><th>v1</th><th>Notes</th></tr>
+  <tr><td>Sign-in (OAuth device flow)</td><td><span class="pill in">In</span></td><td>URL + code + QR, poll for token. One account.</td></tr>
+  <tr><td>Home feed</td><td><span class="pill in">In</span></td><td>Shelf rows with sideways paging (continuations).</td></tr>
+  <tr><td>Search</td><td><span class="pill in">In</span></td><td>One page of results, as on tvOS.</td></tr>
+  <tr><td>Playback with resume</td><td><span class="pill in">In</span></td><td>HLS via VISIONOS client, ladder fallback, position written every 5 s.</td></tr>
+  <tr><td>History</td><td><span class="pill in">In</span></td><td>Watch progress + <code>FEhistory</code>, folded by the tvOS placement rules.</td></tr>
+  <tr><td>Multiple profiles</td><td><span class="pill out">Later</span></td><td>But the profile id (<code>sha256(obfuscatedGaiaId)</code>) is stored from day one, so adding profiles and sync needs no migration.</td></tr>
+  <tr><td>Appwrite watch-progress sync</td><td><span class="pill out">Later</span></td><td>Local-only in v1; the store keeps the same dirty-queue shape.</td></tr>
+  <tr><td>SponsorBlock</td><td><span class="pill out">Later</span></td><td></td></tr>
+  <tr><td>Preview on hover/focus</td><td><span class="pill out">Later</span></td><td></td></tr>
+  <tr><td>Shorts</td><td><span class="pill out">Later</span></td><td>Filtered out entirely in v1, using the tvOS cell-detection rules.</td></tr>
+  <tr><td>Channels / subscriptions</td><td><span class="pill out">Later</span></td><td></td></tr>
+  <tr><td>Comments, news banner</td><td><span class="pill out">Later</span></td><td></td></tr>
+  <tr><td>Top Shelf</td><td><span class="pill out">Never</span></td><td>No Windows equivalent.</td></tr>
+</table></div>
+
+<h2>3 · Stage 0 — playback spike (throwaway)</h2>
+<p>The one real technical risk is whether Windows plays YouTube's HLS. Before any product code is
+written, a minimal throwaway program answers it:</p>
+<ul>
+  <li>Call InnerTube <code>player</code> with the VISIONOS client and a scraped <code>visitorData</code> token.</li>
+  <li>Feed <code>streamingData.hlsManifestUrl</code> to <code>MediaPlayerElement</code> via <code>AdaptiveMediaSource</code>, with the client's User-Agent on media requests.</li>
+  <li>Verify: video and audio play, quality settles sensibly (the manifest tops out at 1080p60 H.264 for hardware decoders; VP9/AV1 variants must be ignored or handled).</li>
+</ul>
+<p>If HLS fails, test the ANDROID client's muxed itag 18 (360p MP4 — plays trivially). The escape
+hatch is libmpv. The spike's outcome decides the player layer; nothing else in this design
+depends on it.</p>
+
+<h2>4 · Architecture</h2>
+<figure>
+<svg viewBox="0 0 720 400" xmlns="http://www.w3.org/2000/svg" font-family="Public Sans, Segoe UI, sans-serif" font-size="13">
+  <style>
+    .box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; rx: 8; }
+    .grp { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+    .lbl { fill: var(--ink); }
+    .sub { fill: var(--muted); font-size: 11px; }
+    .hdr { fill: var(--accent); font-weight: 600; font-size: 11px; letter-spacing: .1em; }
+    .arrow { stroke: var(--muted); stroke-width: 1.5; fill: none; marker-end: url(#ah); }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+    </marker>
+  </defs>
+
+  <rect class="grp" x="10" y="30" width="215" height="340" rx="10"/>
+  <text class="hdr" x="22" y="20">WINTUBE.APP · WINUI 3</text>
+  <rect class="box" x="25" y="50" width="185" height="52" rx="8"/>
+  <text class="lbl" x="40" y="72">Views</text>
+  <text class="sub" x="40" y="90">Login · Home · Search · History · Player</text>
+  <rect class="box" x="25" y="118" width="185" height="52" rx="8"/>
+  <text class="lbl" x="40" y="140">ViewModels</text>
+  <text class="sub" x="40" y="158">CommunityToolkit.Mvvm</text>
+  <rect class="box" x="25" y="186" width="185" height="52" rx="8"/>
+  <text class="lbl" x="40" y="208">Controls</text>
+  <text class="sub" x="40" y="226">VideoCard · shelf row</text>
+  <rect class="box" x="25" y="300" width="185" height="52" rx="8"/>
+  <text class="lbl" x="40" y="322">MediaPlayerElement</text>
+  <text class="sub" x="40" y="340">AdaptiveMediaSource (HLS)</text>
+
+  <rect class="grp" x="265" y="30" width="215" height="340" rx="10"/>
+  <text class="hdr" x="277" y="20">WINTUBE.CORE · .NET 8</text>
+  <rect class="box" x="280" y="50" width="185" height="52" rx="8"/>
+  <text class="lbl" x="295" y="72">InnerTube</text>
+  <text class="sub" x="295" y="90">client defs · JSON paths · visitorData</text>
+  <rect class="box" x="280" y="118" width="185" height="52" rx="8"/>
+  <text class="lbl" x="295" y="140">Auth</text>
+  <text class="sub" x="295" y="158">device flow · accounts · token store</text>
+  <rect class="box" x="280" y="186" width="185" height="52" rx="8"/>
+  <text class="lbl" x="295" y="208">Feed · Search · Player</text>
+  <text class="sub" x="295" y="226">shelf parsing · StreamService ladder</text>
+  <rect class="box" x="280" y="254" width="185" height="52" rx="8"/>
+  <text class="lbl" x="295" y="276">Stores</text>
+  <text class="sub" x="295" y="294">WatchProgress · WatchHistory · metadata</text>
+
+  <rect class="grp" x="520" y="30" width="190" height="340" rx="10"/>
+  <text class="hdr" x="532" y="20">OUTSIDE</text>
+  <rect class="box" x="535" y="50" width="160" height="66" rx="8"/>
+  <text class="lbl" x="550" y="74">YouTube InnerTube</text>
+  <text class="sub" x="550" y="92">TVHTML5 · VISIONOS ·</text>
+  <text class="sub" x="550" y="106">ANDROID</text>
+  <rect class="box" x="535" y="132" width="160" height="52" rx="8"/>
+  <text class="lbl" x="550" y="154">googlevideo.com</text>
+  <text class="sub" x="550" y="172">HLS segments / MP4</text>
+  <rect class="box" x="535" y="254" width="160" height="66" rx="8"/>
+  <text class="lbl" x="550" y="278">%LOCALAPPDATA%\WinTube</text>
+  <text class="sub" x="550" y="296">tokens (DPAPI) · progress,</text>
+  <text class="sub" x="550" y="310">history, cards (JSON)</text>
+
+  <path class="arrow" d="M210 144 H278"/>
+  <path class="arrow" d="M465 90 H533"/>
+  <path class="arrow" d="M465 280 H533"/>
+  <path class="arrow" d="M117 242 V298"/>
+  <path class="arrow" d="M210 326 C 400 326 440 158 533 158"/>
+</svg>
+<figcaption>The app depends on Core; Core owns every network call and every file on disk.
+The player element streams directly from googlevideo with the resolving client's User-Agent.</figcaption>
+</figure>
+
+<pre><code>C:\Projects\WinTube\
+  src\WinTube.Core\          .NET 8 class library — no UI dependencies
+    InnerTube\               InnerTubeClient, client definitions, VisitorDataStore, JSON helpers
+    Auth\                    DeviceAuthService, AccountService, AuthStore
+    Feed\                    FeedService (browse "default", shelf parsing, continuations)
+    Search\                  SearchService
+    Player\                  StreamService (the tvOS ladder, ported)
+    Stores\                  WatchProgressStore, WatchHistoryStore, VideoMetadataService
+  src\WinTube.App\           WinUI 3 (net8.0-windows), MVVM
+    Views\  Controls\
+  tests\WinTube.Core.Tests\  xUnit — parsers and auth against captured, scrubbed responses
+  reference\INNERTUBE.md     copied from metube — the shared contract
+  docs\specs\                this document</code></pre>
+
+<h2>5 · tvOS → Windows translations</h2>
+<div class="table-wrap"><table>
+  <tr><th>tvOS</th><th>Windows</th><th>Note</th></tr>
+  <tr><td>Keychain</td><td>DPAPI (<code>ProtectedData</code>, per user)</td><td>Only the OAuth tokens are secret.</td></tr>
+  <tr><td>UserDefaults</td><td>JSON files in <code>%LOCALAPPDATA%\WinTube</code></td><td>Progress, history cards, subscriptions cache later.</td></tr>
+  <tr><td>AVPlayerViewController</td><td><code>MediaPlayerElement</code>, full-window with overlay controls</td><td>Subject to the Stage 0 spike.</td></tr>
+  <tr><td><code>Secrets.xcconfig</code></td><td>gitignored <code>secrets.json</code> + committed <code>secrets.example.json</code></td><td>Same three public values: InnerTube API key, TV OAuth client id and secret.</td></tr>
+  <tr><td>xcodegen / Makefile</td><td><code>dotnet</code> solution + <code>build.ps1</code> if needed</td><td></td></tr>
+  <tr><td>SwiftLint / swift-format</td><td><code>.editorconfig</code> + Roslyn analyzers, warnings as errors</td><td></td></tr>
+  <tr><td>Top Shelf</td><td>—</td><td>Dropped.</td></tr>
+</table></div>
+
+<h2>6 · Data flow</h2>
+<figure>
+<svg viewBox="0 0 720 210" xmlns="http://www.w3.org/2000/svg" font-family="Public Sans, Segoe UI, sans-serif" font-size="13">
+  <style>
+    .fbox { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+    .flbl { fill: var(--ink); font-weight: 600; }
+    .fsub { fill: var(--muted); font-size: 11px; }
+    .farrow { stroke: var(--muted); stroke-width: 1.5; fill: none; marker-end: url(#ah2); }
+    .fnum { fill: var(--accent); font-weight: 600; font-size: 11px; }
+  </style>
+  <defs>
+    <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+    </marker>
+  </defs>
+  <rect class="fbox" x="10" y="40" width="150" height="60" rx="8"/>
+  <text class="fnum" x="25" y="30">1 · SIGN IN</text>
+  <text class="flbl" x="25" y="65">Device flow</text>
+  <text class="fsub" x="25" y="84">code + QR → tokens (DPAPI)</text>
+  <rect class="fbox" x="200" y="40" width="150" height="60" rx="8"/>
+  <text class="fnum" x="215" y="30">2 · IDENTIFY</text>
+  <text class="flbl" x="215" y="65">accounts_list</text>
+  <text class="fsub" x="215" y="84">profile id = sha256(gaiaId)</text>
+  <rect class="fbox" x="390" y="40" width="150" height="60" rx="8"/>
+  <text class="fnum" x="405" y="30">3 · BROWSE</text>
+  <text class="flbl" x="405" y="65">Home feed</text>
+  <text class="fsub" x="405" y="84">TVHTML5 + Bearer, shelves</text>
+  <rect class="fbox" x="580" y="40" width="130" height="60" rx="8"/>
+  <text class="fnum" x="595" y="30">4 · RESOLVE</text>
+  <text class="flbl" x="595" y="65">StreamService</text>
+  <text class="fsub" x="595" y="84">VISIONOS → ANDROID</text>
+  <rect class="fbox" x="390" y="140" width="150" height="60" rx="8"/>
+  <text class="fnum" x="405" y="130">5 · PLAY</text>
+  <text class="flbl" x="405" y="165">MediaPlayerElement</text>
+  <text class="fsub" x="405" y="184">resume from stored position</text>
+  <rect class="fbox" x="140" y="140" width="180" height="60" rx="8"/>
+  <text class="fnum" x="155" y="130">6 · RECORD</text>
+  <text class="flbl" x="155" y="165">WatchProgressStore</text>
+  <text class="fsub" x="155" y="184">every 5 s → resume, history, red line</text>
+  <path class="farrow" d="M160 70 H198"/>
+  <path class="farrow" d="M350 70 H388"/>
+  <path class="farrow" d="M540 70 H578"/>
+  <path class="farrow" d="M645 100 C 645 170 545 170 542 170"/>
+  <path class="farrow" d="M388 170 H322"/>
+</svg>
+<figcaption>Resume positions feed back into the cards (red progress line) and into History.</figcaption>
+</figure>
+
+<h2>7 · InnerTube contract</h2>
+<p>Ported one-to-one from <code>reference/INNERTUBE.md</code>, which is live-verified. All calls are
+<code>POST …/youtubei/v1/{endpoint}</code> with a JSON <code>context</code> body.</p>
+<div class="table-wrap"><table>
+  <tr><th>Client</th><th>Used for</th><th>Auth</th></tr>
+  <tr><td>TVHTML5</td><td>Home feed (<code>browse "default"</code>), search, <code>accounts_list</code>, <code>FEhistory</code></td><td>Bearer token</td></tr>
+  <tr><td>VISIONOS</td><td><code>player</code> → HLS multivariant manifest</td><td>Scraped <code>visitorData</code></td></tr>
+  <tr><td>ANDROID</td><td><code>player</code> → muxed itag 18 (360p) fallback</td><td>None</td></tr>
+</table></div>
+<div class="callout">
+<p><b>Ladder behaviour</b> (ported from <code>StreamService.swift</code>): a client that resolves but
+does not play sends the caller back with <code>after: failedClient</code>; <code>LOGIN_REQUIRED</code>/<code>ERROR</code>
+mean "try the next client" but the human-readable reason is kept and shown if the whole ladder
+comes up empty. An expired <code>visitorData</code> is retried once with a fresh token before the
+rejection is believed. Dubbed videos: the original audio language is read from
+<code>adaptiveFormats[].audioTrack.audioIsDefault</code> and selected explicitly, since the HLS manifest
+declares no default.</p>
+</div>
+
+<h2>8 · Watch progress and history rules</h2>
+<p>Same semantics as tvOS, same numbers:</p>
+<ul>
+  <li>Position written every 5 s during playback; under <span class="num">10 s</span> counts as
+  "opened", not watched; within <span class="num">20 s</span> of the end pins to the duration —
+  full red line, replay starts from the beginning.</li>
+  <li>History = watch-progress entries (dated) folded with YouTube's <code>FEhistory</code>
+  (~15 videos, undated): an undated video is <em>placed</em> directly below the most recent dated
+  video, keeping YouTube's ordering, never claiming to be newer than something known newer.</li>
+  <li>Cards (title, channel, artwork, duration) are filled from the player's own metadata, the
+  history list, and <code>VideoMetadataService</code> (VISIONOS <code>player</code> minus streaming), four
+  at a time, cached for good.</li>
+  <li>Entries are keyed per profile and carry a dirty-set, so Appwrite sync can be added later
+  without changing the store's shape.</li>
+</ul>
+
+<h2>9 · Error handling</h2>
+<ul>
+  <li>Nothing playable → YouTube's own <code>playabilityStatus</code> reason, or a generic friendly line
+  when there is none. Internal status codes are never shown.</li>
+  <li>Feed or search failing → an inline message with retry; the app never crashes on a network
+  error.</li>
+  <li>Token refresh failing permanently → back to the login screen; stored progress stays.</li>
+</ul>
+
+<h2>10 · Testing</h2>
+<ul>
+  <li><b>Unit tests</b> (xUnit, on Core): feed/search/stream/auth parsing against captured real
+  responses, scrubbed of session identifiers (<code>visitorData</code>, tokens) before committing —
+  the same hygiene the metube repo applies by not committing samples at all.</li>
+  <li><b>HTTP is injected</b> (<code>HttpMessageHandler</code>) so every service is testable offline.</li>
+  <li><b>Playback and UI</b>: manual verification in v1. No UI automation yet.</li>
+</ul>
+
+<h2>11 · Stages after v1</h2>
+<p>Each is its own brainstorm-and-spec cycle, in rough order of value: Appwrite watch-progress
+sync (shares resume positions with the Apple TV), multiple profiles, SponsorBlock, Shorts row,
+channels and subscriptions, preview on hover.</p>
+
+<p class="meta" style="border-bottom:none;border-top:1px solid var(--line);padding-top:1.5rem;margin-top:3rem;">
+<span>WinTube v1 design · 2026-08-20 · approved in session, spec pending review</span></p>
+</main>
