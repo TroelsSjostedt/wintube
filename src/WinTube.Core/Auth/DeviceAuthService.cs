@@ -9,6 +9,10 @@ public sealed record OAuthTokens(string AccessToken, string? RefreshToken);
 
 public sealed class DeviceAuthException(string message) : Exception(message)
 {
+    /// True for a failure that says nothing about the tokens themselves (e.g. a 502/503 from
+    /// the token endpoint) — callers should let the user retry rather than signing out.
+    public bool IsTransient { get; init; }
+
     public static DeviceAuthException Expired() =>
         new("The sign-in code expired before you finished. Please try again.");
 
@@ -140,7 +144,8 @@ public sealed class DeviceAuthService(HttpClient http, Secrets secrets)
             throw response.IsSuccessStatusCode
                 ? DeviceAuthException.Invalid()
                 : new DeviceAuthException(
-                    $"Network error (HTTP {(int)response.StatusCode}). Please try again.");
+                    $"Network error (HTTP {(int)response.StatusCode}). Please try again.")
+                    { IsTransient = true };
         }
     }
 }

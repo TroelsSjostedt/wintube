@@ -3,7 +3,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:WinTube.App.Controls"
-    xmlns:local="using:WinTube.App.Views">
+    xmlns:local="using:WinTube.App.Views"
+    NavigationCacheMode="Required">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>

@@ -75,4 +75,31 @@ public class DeviceAuthServiceTests
         Assert.Equal("AT2", tokens.AccessToken);
         Assert.Null(tokens.RefreshToken);   // caller keeps the existing one
     }
+
+    [Fact]
+    public async Task Refresh_NonJsonServerErrorIsTransient()
+    {
+        var handler = new StubHttpHandler((_, _) => new HttpResponseMessage
+        {
+            StatusCode = System.Net.HttpStatusCode.ServiceUnavailable,
+            Content = new StringContent(
+                "<html><body>503 Service Unavailable</body></html>",
+                System.Text.Encoding.UTF8, "text/html"),
+        });
+        var ex = await Assert.ThrowsAsync<DeviceAuthException>(() =>
+            new DeviceAuthService(new HttpClient(handler), TestSecrets)
+                .RefreshAsync("RT"));
+        Assert.True(ex.IsTransient);
+    }
+
+    [Fact]
+    public async Task Refresh_OAuthErrorIsNotTransient()
+    {
+        var handler = new StubHttpHandler((_, _) =>
+            StubHttpHandler.JsonResponse("""{"error":"invalid_grant"}""", 400));
+        var ex = await Assert.ThrowsAsync<DeviceAuthException>(() =>
+            new DeviceAuthService(new HttpClient(handler), TestSecrets)
+                .RefreshAsync("RT"));
+        Assert.False(ex.IsTransient);
+    }
 }

@@ -31,6 +31,11 @@ public sealed class Session
     public StoredProfile? Profile { get; private set; }
     public bool IsSignedIn => Profile is not null;
 
+    /// Raised at the end of SignOut(), whether triggered by the user or by RunAsync giving up
+    /// on a permanently failed refresh. Continuations in this class resume on the UI thread, so
+    /// subscribers don't need to marshal back themselves.
+    public event Action? SignedOut;
+
     public Session(HttpClient http, Secrets secrets)
     {
         InnerTube = new InnerTubeClient(http, secrets);
@@ -60,7 +65,11 @@ public sealed class Session
         {
             OAuthTokens fresh;
             try { fresh = await DeviceAuth.RefreshAsync(profile.RefreshToken); }
-            catch (DeviceAuthException) { SignOut(); throw; }
+            catch (DeviceAuthException ex)
+            {
+                if (!ex.IsTransient) SignOut();
+                throw;
+            }
             accessToken = fresh.AccessToken;
             Profile = profile with
             {
@@ -91,6 +100,7 @@ public sealed class Session
         Profile = null;
         accessToken = null;
         ActivateStores();
+        SignedOut?.Invoke();
     }
 
     private void ActivateStores()

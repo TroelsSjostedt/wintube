@@ -1,3 +1,4 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -12,9 +13,12 @@ public sealed partial class MainWindow : Window
     /// highlight (sign-in, sign-out) from also triggering OnSelectionChanged's navigation.
     private bool suppressSelectionNavigation;
 
+    private readonly DispatcherQueue dispatcher = DispatcherQueue.GetForCurrentThread();
+
     public MainWindow()
     {
         InitializeComponent();
+        App.Session.SignedOut += OnSessionSignedOut;
         ProfileName.Text = App.Session.Profile?.Name ?? "";
         if (App.Session.IsSignedIn)
         {
@@ -52,11 +56,22 @@ public sealed partial class MainWindow : Window
         if (RootFrame.SourcePageType != target) RootFrame.Navigate(target);
     }
 
-    private void OnSignOut(object sender, RoutedEventArgs e)
+    private void OnSignOut(object sender, RoutedEventArgs e) => App.Session.SignOut();
+
+    /// Session.SignOut() raises this both for the manual sign-out above and for RunAsync
+    /// giving up on a permanently failed refresh (which can happen from an async
+    /// continuation) — either way, land back on LoginPage and reset the shell's chrome.
+    private void OnSessionSignedOut()
     {
-        App.Session.SignOut();
+        if (dispatcher.HasThreadAccess) NavigateToLogin();
+        else dispatcher.TryEnqueue(NavigateToLogin);
+    }
+
+    private void NavigateToLogin()
+    {
         ProfileName.Text = "";
-        RootFrame.Navigate(typeof(Views.LoginPage));
+        if (RootFrame.SourcePageType != typeof(Views.LoginPage))
+            RootFrame.Navigate(typeof(Views.LoginPage));
         RootFrame.BackStack.Clear();
         suppressSelectionNavigation = true;
         Nav.SelectedItem = HomeItem;
