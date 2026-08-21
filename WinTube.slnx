@@ -1,8 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/WinTube.Core/WinTube.Core.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/WinTube.Core.Tests/WinTube.Core.Tests.csproj" />
-  </Folder>
-</Solution>
