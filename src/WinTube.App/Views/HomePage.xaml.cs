@@ -168,8 +168,6 @@ public sealed partial class HomePage : Page
 
     // MARK: card interaction
 
-    private void OnVideoCardClicked(object sender, VideoItem video)
-    {
-        // Task 16: navigate to PlayerPage
-    }
+    private void OnVideoCardClicked(object sender, VideoItem video) =>
+        Frame.Navigate(typeof(PlayerPage), video);
 }
