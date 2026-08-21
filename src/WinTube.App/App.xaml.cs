@@ -8,6 +8,7 @@ public partial class App : Application
     /// One HttpClient for every Core service — sockets are pooled per instance.
     public static HttpClient Http { get; } = new();
     public static Secrets Secrets { get; } = Secrets.Load();
+    public static Session Session { get; } = new(Http, Secrets);
 
     public static MainWindow? Window { get; private set; }
 

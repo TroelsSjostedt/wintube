@@ -8,7 +8,8 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        RootFrame.Navigate(typeof(Views.SpikePage));   // Task 14 replaces this with login/home
+        // Interim routing until Task 15 adds HomePage: signed-in still lands on SpikePage.
+        RootFrame.Navigate(App.Session.IsSignedIn ? typeof(Views.SpikePage) : typeof(Views.LoginPage));
     }
 
     public Frame Frame => RootFrame;
