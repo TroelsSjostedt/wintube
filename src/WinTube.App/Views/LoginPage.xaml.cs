@@ -55,8 +55,8 @@ public sealed partial class LoginPage : Page
         var tokens = await App.Session.DeviceAuth.PollAsync(requested.Code, requested.IntervalSeconds);
 
         await App.Session.CompleteSignInAsync(tokens);
-        // Task 14 interim target — Task 15 adds HomePage and this navigates there instead.
-        Frame.Navigate(typeof(SpikePage));
+        App.Window?.OnSignedIn();
+        Frame.Navigate(typeof(HomePage));
     }
 
     private async void OnOpenBrowser(object sender, RoutedEventArgs e)

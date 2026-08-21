@@ -3,5 +3,24 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="WinTube">
-    <Frame x:Name="RootFrame" />
+    <NavigationView x:Name="Nav" PaneDisplayMode="Left" IsSettingsVisible="False"
+                    SelectionChanged="OnSelectionChanged">
+        <NavigationView.MenuItems>
+            <NavigationViewItem x:Name="HomeItem" Content="Home" Tag="Home"/>
+            <NavigationViewItem x:Name="SearchItem" Content="Search" Tag="Search"/>
+            <NavigationViewItem x:Name="HistoryItem" Content="History" Tag="History"/>
+        </NavigationView.MenuItems>
+        <NavigationView.PaneFooter>
+            <Button x:Name="ProfileButton" HorizontalAlignment="Stretch" Margin="4,8"
+                    HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0">
+                <TextBlock x:Name="ProfileName" TextTrimming="CharacterEllipsis"/>
+                <Button.Flyout>
+                    <Flyout>
+                        <Button Content="Sign out" Click="OnSignOut"/>
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
+        </NavigationView.PaneFooter>
+        <Frame x:Name="RootFrame"/>
+    </NavigationView>
 </Window>
