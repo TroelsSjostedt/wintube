@@ -1,0 +1,89 @@
+# WinTube
+
+**A YouTube client for Windows, built for one viewer.**
+
+> **This is a personal project, for my own use only.** It reimplements YouTube's private
+> InnerTube API against my own Google account, it is distributed to nobody but me, and it is
+> not intended, supported, or fit for anyone else's use. The code is public because there is
+> no reason to hide it — not because it is a product.
+
+## What it is
+
+A Windows desktop port of [metube](https://github.com/claust/metube), the same client built
+for Apple TV: sign in with YouTube's TV device-activation flow, browse your own Home
+recommendations, search, and play videos with resume — as an ordinary windowed
+mouse-and-keyboard app instead of a 10-foot remote-driven one. Same account, same InnerTube
+recipe, same watch-progress rules.
+
+## Setup
+
+```powershell
+mkdir $env:LOCALAPPDATA\WinTube -ea 0
+cp secrets.example.json $env:LOCALAPPDATA\WinTube\secrets.json
+notepad $env:LOCALAPPDATA\WinTube\secrets.json
+```
+
+Fill in the same three values as the tvOS repo's `YouTubeTV/Config/Secrets.xcconfig`: the
+public InnerTube web API key, and the YouTube-on-TV OAuth client id and secret. These are not
+per-user secrets — they are kept out of the repo the same way the tvOS app keeps them out of
+its repo.
+
+## Build, run, test
+
+```powershell
+dotnet build src/WinTube.App -p:Platform=x64
+.\src\WinTube.App\bin\x64\Debug\net8.0-windows10.0.19041.0\WinTube.App.exe
+# or, equivalently:
+dotnet run --project src/WinTube.App -p:Platform=x64
+
+dotnet test tests/WinTube.Core.Tests
+```
+
+## First run
+
+The one real technical risk the design spec called out (§3, "stage-0 playback gate") — whether
+`MediaPlayerElement` plays YouTube's HLS manifest at all — has not yet been exercised on this
+machine. The first manual run should verify playback. If HLS fails, the ANDROID client's muxed
+itag-18 fallback (360p) should kick in automatically; libmpv is the planned escape hatch if
+that fallback also proves insufficient.
+
+## Project layout
+
+| Path | What's there |
+|---|---|
+| `src/WinTube.Core/InnerTube` | Client identities, JSON traversal, `InnerTubeClient` POST wrapper, `visitorData` scrape/cache |
+| `src/WinTube.Core/Auth` | OAuth device flow, DPAPI token store, `accounts_list`, profile id |
+| `src/WinTube.Core/Feed` | Home feed shelf parsing, relative-time formatting |
+| `src/WinTube.Core/Search` | Search |
+| `src/WinTube.Core/Player` | `StreamService` — the VISIONOS → ANDROID resolve ladder |
+| `src/WinTube.Core/Stores` | Watch progress, watch history, video metadata |
+| `src/WinTube.App` | WinUI 3 (net8.0-windows, x64, unpackaged) — Views, Session, MainWindow shell |
+| `tests/WinTube.Core.Tests` | xUnit — Core only, against captured/synthetic responses with injected HTTP |
+| `reference/INNERTUBE.md` | Copied from the metube repo — the shared InnerTube contract |
+| `docs/specs/` | Approved design spec (self-contained HTML) |
+| `docs/superpowers/plans/` | The implementation plan this repo was built from |
+
+## v1 scope
+
+| Feature | v1 | Notes |
+|---|---|---|
+| Sign-in (OAuth device flow) | In | URL + code, poll for token. One account. |
+| Home feed | In | Shelf rows with sideways paging (continuations). |
+| Search | In | One page of results, as on tvOS. |
+| Playback with resume | In | HLS via VISIONOS client, ladder fallback, position written every 5 s. |
+| History | In | Watch progress + `FEhistory`, folded by the tvOS placement rules. |
+| Multiple profiles | Later | Profile id (`sha256(obfuscatedGaiaId)`) is stored from day one so this needs no migration. |
+| Appwrite watch-progress sync | Later | Local-only in v1; the store keeps the same dirty-queue shape. |
+| SponsorBlock | Later | |
+| Preview on hover/focus | Later | |
+| Shorts | Later | Filtered out entirely in v1. |
+| Channels / subscriptions | Later | |
+| Comments | Later | |
+| Copy YouTube URL | Later | With or without a timestamp for the current position. |
+| Open YouTube links in the app | Later | Register for `youtube.com`/`youtu.be` links. |
+| News banner | Never | Not wanted on Windows. |
+| Top Shelf | Never | No Windows equivalent. |
+
+## Licence
+
+Not affiliated with, endorsed by, or connected to YouTube or Google.
