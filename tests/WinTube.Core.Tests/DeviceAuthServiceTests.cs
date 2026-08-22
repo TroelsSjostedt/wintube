@@ -7,15 +7,24 @@ public class DeviceAuthServiceTests
 {
     private static readonly Secrets TestSecrets = new("K", "CLIENT_ID", "CLIENT_SECRET");
 
+    private static System.Text.Json.JsonElement ParseBody(string body) =>
+        System.Text.Json.JsonDocument.Parse(body).RootElement;
+
     [Fact]
-    public async Task RequestCode_ParsesResponseAndSendsForm()
+    public async Task RequestCode_SendsJsonWithDeviceIdentity()
     {
         var handler = new StubHttpHandler((request, body) =>
         {
             Assert.Equal("https://www.youtube.com/o/oauth2/device/code",
                 request.RequestUri!.ToString());
-            Assert.Contains("client_id=CLIENT_ID", body);
-            Assert.Contains("scope=", body);
+            Assert.Equal("application/json", request.Content!.Headers.ContentType!.MediaType);
+            var json = ParseBody(body);
+            Assert.Equal("CLIENT_ID", json.GetProperty("client_id").GetString());
+            Assert.Contains("gdata.youtube.com", json.GetProperty("scope").GetString());
+            // The endpoint rejects requests without a device identity (verified 2026-08-22:
+            // bare client_id+scope now answers invalid_request).
+            Assert.Equal("ytlr::", json.GetProperty("device_model").GetString());
+            Assert.Equal(32, json.GetProperty("device_id").GetString()!.Length);
             return StubHttpHandler.JsonResponse("""
                 {"device_code":"DEV","user_code":"ABC-DEF",
                  "verification_url":"https://www.youtube.com/activate",
@@ -36,7 +45,8 @@ public class DeviceAuthServiceTests
         var polls = 0;
         var handler = new StubHttpHandler((_, body) =>
         {
-            Assert.Contains("grant_type=http", body);
+            Assert.Equal("http://oauth.net/grant_type/device/1.0",
+                ParseBody(body).GetProperty("grant_type").GetString());
             polls++;
             return polls < 3
                 ? StubHttpHandler.JsonResponse("""{"error":"authorization_pending"}""", 428)
@@ -66,8 +76,9 @@ public class DeviceAuthServiceTests
     {
         var handler = new StubHttpHandler((_, body) =>
         {
-            Assert.Contains("grant_type=refresh_token", body);
-            Assert.Contains("refresh_token=RT", body);
+            var json = ParseBody(body);
+            Assert.Equal("refresh_token", json.GetProperty("grant_type").GetString());
+            Assert.Equal("RT", json.GetProperty("refresh_token").GetString());
             return StubHttpHandler.JsonResponse("""{"access_token":"AT2"}""");
         });
         var tokens = await new DeviceAuthService(new HttpClient(handler), TestSecrets)

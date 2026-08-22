@@ -42,10 +42,16 @@ public sealed class DeviceAuthService(HttpClient http, Secrets secrets)
 
     public async Task<DeviceCode> RequestCodeAsync(CancellationToken ct = default)
     {
-        using var doc = await PostFormAsync(DeviceCodeUrl, new()
+        // device_id/device_model are required: without them the endpoint answers
+        // invalid_request (verified 2026-08-22; bare client_id+scope worked in July 2026 and
+        // no longer does). "ytlr::" is what the YouTube-on-TV client family identifies as —
+        // the same value yt-dlp's oauth2 flow sends.
+        using var doc = await PostJsonAsync(DeviceCodeUrl, new()
         {
             ["client_id"] = secrets.OAuthClientId,
             ["scope"] = Scope,
+            ["device_id"] = Guid.NewGuid().ToString("N"),
+            ["device_model"] = "ytlr::",
         }, ct);
         var json = doc.RootElement;
 
@@ -87,7 +93,7 @@ public sealed class DeviceAuthService(HttpClient http, Secrets secrets)
             var sleep = TimeSpan.FromSeconds(Math.Min(interval, remaining.TotalSeconds));
             if (sleep > TimeSpan.Zero) await Task.Delay(sleep, ct);
 
-            using var doc = await PostFormAsync(TokenUrl, form, ct);
+            using var doc = await PostJsonAsync(TokenUrl, form, ct);
             var json = doc.RootElement;
 
             if (InnerTube.Json.StringAt(json, "access_token") is { } accessToken)
@@ -107,7 +113,7 @@ public sealed class DeviceAuthService(HttpClient http, Secrets secrets)
     /// The response usually omits a new refresh token; the caller then keeps the existing one.
     public async Task<OAuthTokens> RefreshAsync(string refreshToken, CancellationToken ct = default)
     {
-        using var doc = await PostFormAsync(TokenUrl, new()
+        using var doc = await PostJsonAsync(TokenUrl, new()
         {
             ["client_id"] = secrets.OAuthClientId,
             ["client_secret"] = secrets.OAuthClientSecret,
@@ -124,13 +130,16 @@ public sealed class DeviceAuthService(HttpClient http, Secrets secrets)
     }
 
     /// OAuth errors come back as JSON on 4xx, so JSON is parsed regardless of status; only a
-    /// non-JSON failure throws on the HTTP status.
-    private async Task<JsonDocument> PostFormAsync(
+    /// non-JSON failure throws on the HTTP status. The body is JSON, not form-encoded — this
+    /// endpoint pair accepts (and yt-dlp sends) JSON, and the form shape stopped working for
+    /// device/code in Aug 2026.
+    private async Task<JsonDocument> PostJsonAsync(
         string url, Dictionary<string, string> fields, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, url)
         {
-            Content = new FormUrlEncodedContent(fields),
+            Content = new StringContent(
+                JsonSerializer.Serialize(fields), System.Text.Encoding.UTF8, "application/json"),
         };
         request.Headers.TryAddWithoutValidation("Accept", "application/json");
         var response = await http.SendAsync(request, ct);
