@@ -1,0 +1,16 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/WinTube.App/WinTube.App.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/WinTube.Core/WinTube.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WinTube.Core.Tests/WinTube.Core.Tests.csproj" />
+  </Folder>
+</Solution>
