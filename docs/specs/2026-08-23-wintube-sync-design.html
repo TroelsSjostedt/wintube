@@ -1,0 +1,178 @@
+<title>WinTube Sync</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5;
+    --ink: #24211E;
+    --muted: #6B645C;
+    --accent: #A63D2F;
+    --line: #E4DFD8;
+    --card: #FFFFFF;
+    --code-bg: #F1EDE7;
+    --good: #3D6B4F;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+      --line: #35302B; --card: #242019; --code-bg: #262119; --good: #7FB08F;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+    --line: #35302B; --card: #242019; --code-bg: #262119; --good: #7FB08F;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "Public Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 16px; line-height: 1.6; margin: 0; padding: 0 1.25rem 6rem;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2, h3 {
+    font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif;
+    text-wrap: balance; line-height: 1.2;
+  }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  p { margin: .75rem 0; }
+  a { color: var(--accent); }
+  code, pre { font-family: "IBM Plex Mono", Consolas, monospace; font-size: .85em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1rem 1.25rem; overflow-x: auto; line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .eyebrow {
+    font-family: "Schibsted Grotesk", sans-serif; font-size: .72rem; font-weight: 600;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
+    margin: 3.5rem 0 .25rem;
+  }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; color: var(--muted);
+    font-size: .85rem; margin: 1rem 0 0; padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  .table-wrap { overflow-x: auto; }
+  th {
+    text-align: left; font-family: "Schibsted Grotesk", sans-serif; font-size: .78rem;
+    font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+    border-bottom: 2px solid var(--line); padding: .4rem .75rem .4rem 0;
+  }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .75rem .55rem 0; vertical-align: top; }
+  td:first-child, th:first-child { padding-left: 0; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--card);
+    border-radius: 0 8px 8px 0; padding: .75rem 1.25rem; margin: 1.25rem 0;
+  }
+  ul { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Stage 2 · Approved 2026-08-23</p>
+  <h1>WinTube Sync</h1>
+  <p>Watch-progress sync against the self-hosted Appwrite backend the tvOS app already uses —
+  so resume positions travel between the Apple TV and Windows. A port of the tvOS
+  <code>WatchProgressSync</code>/<code>AppwriteClient</code> pair; the backend itself
+  (<a href="https://github.com/claust/metube">metube</a> <code>Backend/</code>) is untouched.</p>
+  <div class="meta">
+    <span><b>Principle</b> Local-first, best-effort, every failure silent</span>
+    <span><b>Login</b> None — the YouTube sign-in is the identity</span>
+    <span><b>Base</b> WinTube v1 (verified 2026-08-23)</span>
+  </div>
+</header>
+
+<h2>1 · Identity — sharing rows with the Apple TV</h2>
+<p>The backend keys everything off tvOS's profile id, which is <b>sha256(accountKey) truncated
+to 16 hex</b> (<code>Profile.id(for:)</code>). WinTube stores the full 64-hex digest of the same
+hash, so its first 16 characters are byte-identical to the tvOS id. No migration:</p>
+<div class="table-wrap"><table>
+  <tr><th>Value</th><th>Derivation</th><th>Example use</th></tr>
+  <tr><td>Sync profile id</td><td><code>ProfileId[..16]</code> (local 64-hex truncated)</td><td>Row id prefix</td></tr>
+  <tr><td>Appwrite user id</td><td><code>"yt" + syncProfileId</code> — computed by the backend, received by the app</td><td>Row <code>userId</code> column + permissions</td></tr>
+  <tr><td>Row id</td><td><code>{syncProfileId}_{videoId}</code></td><td>Idempotent upsert; same row both devices</td></tr>
+</table></div>
+<p>The <code>metube-auth</code> function verifies <code>{accessToken, accountKey}</code> by
+calling <code>accounts_list</code> itself — it needs the <b>raw</b> account key (obfuscated
+Gaia id), which v1 does not persist. <code>StoredProfile</code> gains an <code>AccountKey</code>
+field; a tokens.bin written before this stage backfills it with one
+<code>accounts_list</code> call and a re-save.</p>
+
+<h2>2 · Backend contract (from AppwriteClient.swift, verified against server 1.9.6)</h2>
+<div class="table-wrap"><table>
+  <tr><th>Call</th><th>Endpoint</th><th>Notes</th></tr>
+  <tr><td>Sign-in step 1</td><td><code>POST /functions/metube-auth/executions</code></td><td>Body <code>{"body": "&lt;json string&gt;", "path": "/", "method": "POST"}</code>; the function's own status/body ride inside the execution (<code>responseStatusCode</code>, <code>responseBody</code>).</td></tr>
+  <tr><td>Sign-in step 2</td><td><code>POST /account/sessions/token</code></td><td>Body <code>{userId, secret}</code>. The session arrives ONLY as <code>Set-Cookie: a_session_*</code> — the body's <code>secret</code> is empty. Store cookie pairs; replay by hand (never a cookie container: it must survive per-profile storage).</td></tr>
+  <tr><td>Pull</td><td><code>GET /tablesdb/metube/tables/watchProgress/rows</code></td><td><code>queries[]</code> params, JSON-encoded: <code>equal(userId)</code>, <code>orderAsc(watchedAt)</code>, <code>limit(100)</code>, optional <code>greaterThan(watchedAt, since)</code>, <code>cursorAfter(lastRowId)</code>; plus <code>total=false</code>.</td></tr>
+  <tr><td>Push</td><td><code>PUT /tablesdb/metube/tables/watchProgress/rows/{rowId}</code></td><td>Body <code>{"data": {userId, videoId, position, duration, watchedAt}, "permissions": [read/update/delete for user:{userId}]}</code>.</td></tr>
+</table></div>
+<p>Headers on every call: <code>Content-Type: application/json</code>,
+<code>X-Appwrite-Project: {projectId}</code>, <code>X-Appwrite-Response-Format: 1.9.5</code>,
+<code>Origin: appwrite-tvos://dk.delectosoft.metube</code> (the tvOS platform registration is
+reused — zero server changes; a dedicated Windows platform can be registered later), and the
+stored <code>Cookie</code> when a session exists. Error bodies are parsed regardless of status
+(<code>message</code> is the useful part); 401 is distinguished as
+<em>session-invalid → discard session, re-sign-in on the next run</em>. Dates are ISO 8601
+<b>with fractional seconds</b>.</p>
+
+<h2>3 · Sync engine rules (from WatchProgressSync.swift)</h2>
+<ul>
+  <li><b>Local-first:</b> the store remains the single source of truth; sync only pushes what is
+  there and folds in what came back. Every network failure is swallowed — an unreachable home
+  server costs nothing but the sync.</li>
+  <li><b>Push:</b> debounced 15 s after the last local write; immediate on player close and app
+  exit. Sequential, one row at a time; a failed row stays queued and the loop stops (next flush
+  retries).</li>
+  <li><b>Pull:</b> incremental by <code>watchedAt</code> high-water mark (persisted per profile),
+  paged 100 rows with <code>cursorAfter</code>; a failed page ends the pull without advancing
+  the mark. After the <em>first ever</em> successful pull, <code>QueueAll(except: pulled)</code>
+  uploads the pre-sync history.</li>
+  <li><b>Merge:</b> last-writer-wins on <code>UpdatedAt</code>; merged entries are never marked
+  dirty (no echo). An unpushed local edit is newer than anything remote and survives.</li>
+  <li><b>MarkSynced guard:</b> a pushed video's dirty flag clears only if its
+  <code>UpdatedAt</code> still equals the pushed value — playback that moved on mid-upload
+  stays queued.</li>
+  <li><b>Sign-in:</b> single-flight; the minted session (cookie + userId) is DPAPI-persisted
+  beside the OAuth tokens. 401 anywhere → session discarded, next run signs in afresh.</li>
+  <li><b>Triggers:</b> app start/sign-in → pull+push; player close → immediate push;
+  <code>Window.Activated</code> → sync with a 60 s cooldown (the foregrounding equivalent);
+  app close → flush.</li>
+</ul>
+
+<h2>4 · Changes to existing code</h2>
+<div class="table-wrap"><table>
+  <tr><th>File</th><th>Change</th></tr>
+  <tr><td><code>WatchProgressStore</code></td><td>Add <code>OnLocalChange</code> (fired by Report only — never by merges), <code>Merge(remote)</code>, <code>QueueAll(except)</code>, <code>MarkSynced(pushed)</code>, and a persisted per-profile <code>PulledAt</code> mark. Existing 10 s/20 s rules untouched.</td></tr>
+  <tr><td><code>StoredProfile</code></td><td>+ <code>AccountKey</code> (nullable; backfilled once via <code>accounts_list</code>).</td></tr>
+  <tr><td><code>Secrets</code></td><td>+ optional <code>appwriteHost</code>, <code>appwriteProjectId</code>. Empty/absent = sync off (fresh-clone default, same policy as tvOS). Host only — the scheme and <code>/v1</code> are appended in code.</td></tr>
+  <tr><td><code>Session</code> / app</td><td>Owns a <code>WatchProgressSync</code>; wires the triggers above; sign-out discards the Appwrite session but leaves the backend rows (surviving sign-out is the feature's point).</td></tr>
+</table></div>
+
+<h2>5 · New Core files</h2>
+<pre><code>src\WinTube.Core\Sync\AppwriteClient.cs    4 REST calls, hand-rolled (no SDK); cookie parsing
+src\WinTube.Core\Sync\AppwriteQuery.cs     JSON query-string builders (equal/greaterThan/…)
+src\WinTube.Core\Sync\AppwriteSessionStore.cs   DPAPI-protected {userId, cookie} per profile
+src\WinTube.Core\Sync\WatchProgressSync.cs the engine (debounce, pull/push, single-flight)</code></pre>
+
+<h2>6 · Testing</h2>
+<ul>
+  <li><b>Unit (stubbed HTTP):</b> sign-in execution unwrap + cookie extraction from repeated
+  <code>Set-Cookie</code> headers; query-string encoding; pull paging + high-water mark;
+  first-pull QueueAll; LWW merge both directions; MarkSynced guard; 401 → session invalidation;
+  debounce collapse (injectable delay).</li>
+  <li><b>Live verification (the user):</b> watch on Windows → resume on Apple TV, and the
+  reverse; sign out/in on Windows → history restored from the backend.</li>
+</ul>
+
+<h2>7 · Out of scope</h2>
+<p>Multiple profiles (the engine is written against one active profile, as v1 is), history-card
+sync (cards stay local, as on tvOS), row deletion, and any backend change.</p>
+
+<p class="meta" style="border-bottom:none;border-top:1px solid var(--line);padding-top:1.5rem;margin-top:3rem;">
+<span>WinTube Sync design · 2026-08-23 · approved in session, spec pending review</span></p>
+</main>
