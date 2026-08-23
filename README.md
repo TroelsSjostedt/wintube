@@ -42,10 +42,10 @@ dotnet test tests/WinTube.Core.Tests
 ## First run
 
 The one real technical risk the design spec called out (§3, "stage-0 playback gate") — whether
-`MediaPlayerElement` plays YouTube's HLS manifest at all — has not yet been exercised on this
-machine. The first manual run should verify playback. If HLS fails, the ANDROID client's muxed
-itag-18 fallback (360p) should kick in automatically; libmpv is the planned escape hatch if
-that fallback also proves insufficient.
+`MediaPlayerElement` plays YouTube's HLS manifest at all — **passed on 2026-08-23**: video and
+audio play, seeking and resume work. The ANDROID client's muxed itag-18 fallback (360p) remains
+in the ladder for videos the VISIONOS client can't serve; libmpv stays the escape hatch if HLS
+ever regresses.
 
 ## Project layout
 
