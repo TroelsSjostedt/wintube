@@ -1713,13 +1713,11 @@ git add -A && git commit -m "feat: wire watch-progress sync into session, window
 
 Run: `dotnet test tests/WinTube.Core.Tests` and `dotnet build src/WinTube.App -p:Platform=x64` — all green.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A && git commit -m "docs: watch-progress sync README and verification"
 ```
-
-(Will tick after commit.)
 
 ---
 
