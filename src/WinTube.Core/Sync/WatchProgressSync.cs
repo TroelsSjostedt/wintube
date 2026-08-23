@@ -57,7 +57,7 @@ public sealed class WatchProgressSync
         activation.Cancel();
         activation = new CancellationTokenSource();
         debounce?.Cancel();
-        signInTask = null;
+        lock (signInGate) signInTask = null;
 
         if (profileId is null || accountKey is null || accessToken is null)
         {
@@ -262,11 +262,12 @@ public sealed class WatchProgressSync
             // Snapshotted: playback can queue more videos while this loop awaits the
             // network, and those belong to the next flush.
             var queued = store.Dirty.ToList();
+            var entries = store.Entries;
             var pushed = new Dictionary<string, DateTimeOffset>();
             foreach (var videoId in queued)
             {
                 if (ct.IsCancellationRequested) break;
-                if (!store.Entries.TryGetValue(videoId, out var entry)) continue;
+                if (!entries.TryGetValue(videoId, out var entry)) continue;
                 try
                 {
                     await client.UpsertRowAsync(

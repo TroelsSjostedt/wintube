@@ -138,7 +138,9 @@ public sealed class Session
         try
         {
             if (Profile is not { AccountKey: null }) return;
+            var captured = Profile;
             var info = await RunAsync(t => Accounts.LoadAsync(t));
+            if (!ReferenceEquals(Profile, captured)) return;
             Profile = Profile with { AccountKey = info.Key };
             tokenStore.Save(Profile);
             ActivateSync();

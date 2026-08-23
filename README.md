@@ -81,7 +81,7 @@ ever regresses.
 | Playback with resume | In | HLS via VISIONOS client, ladder fallback, position written every 5 s. |
 | History | In | Watch progress + `FEhistory`, folded by the tvOS placement rules. |
 | Multiple profiles | Later | Profile id (`sha256(obfuscatedGaiaId)`) is stored from day one so this needs no migration. |
-| Appwrite watch-progress sync | Later | Local-only in v1; the store keeps the same dirty-queue shape. |
+| Appwrite watch-progress sync | **In (stage 2)** | Shares rows with the Apple TV; see the sync section above. |
 | SponsorBlock | Later | |
 | Preview on hover/focus | Later | |
 | Shorts | Later | Filtered out entirely in v1. |
