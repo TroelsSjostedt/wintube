@@ -5,6 +5,7 @@ using WinTube.Core.InnerTube;
 using WinTube.Core.Player;
 using WinTube.Core.Search;
 using WinTube.Core.Stores;
+using WinTube.Core.Sync;
 
 namespace WinTube.App;
 
@@ -16,6 +17,7 @@ public sealed class Session
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinTube");
 
     private readonly TokenStore tokenStore = new(DataDirectory);
+    private readonly AppwriteSessionStore? appwriteSessions;
     private string? accessToken;
 
     public InnerTubeClient InnerTube { get; }
@@ -27,6 +29,7 @@ public sealed class Session
     public VideoMetadataService Metadata { get; }
     public WatchProgressStore Progress { get; } = new(DataDirectory);
     public WatchHistoryStore History { get; } = new(DataDirectory);
+    public WatchProgressSync? ProgressSync { get; }
 
     public StoredProfile? Profile { get; private set; }
     public bool IsSignedIn => Profile is not null;
@@ -47,9 +50,20 @@ public sealed class Session
         Streams = new StreamService(InnerTube, visitorData);
         Metadata = new VideoMetadataService(InnerTube, visitorData);
 
+        var appwrite = AppwriteConfig.FromSecrets(secrets);
+        if (appwrite is not null)
+        {
+            appwriteSessions = new AppwriteSessionStore(DataDirectory);
+            ProgressSync = new WatchProgressSync(
+                Progress, new AppwriteClient(http, appwrite), appwriteSessions, DataDirectory);
+        }
+
         Profile = tokenStore.Load();
         accessToken = Profile?.AccessToken;
         ActivateStores();
+        ActivateSync();
+
+        _ = BackfillAccountKeyAsync();
     }
 
     /// Runs an authenticated call; on 401 refreshes the token once and retries. A refresh
@@ -77,6 +91,7 @@ public sealed class Session
                 RefreshToken = fresh.RefreshToken ?? profile.RefreshToken,
             };
             tokenStore.Save(Profile);
+            ActivateSync();
             return await call(accessToken);
         }
     }
@@ -88,14 +103,17 @@ public sealed class Session
         var account = await Accounts.LoadAsync(tokens.AccessToken);
         Profile = new StoredProfile(
             ProfileId.From(account.Key), account.Name, account.AvatarUrl,
-            tokens.AccessToken, tokens.RefreshToken ?? "");
+            tokens.AccessToken, tokens.RefreshToken ?? "", account.Key);
         accessToken = tokens.AccessToken;
         tokenStore.Save(Profile);
         ActivateStores();
+        ActivateSync();
     }
 
     public void SignOut()
     {
+        ProgressSync?.Activate(null, null, null);
+        if (Profile is { } profile) appwriteSessions?.Delete(profile.ProfileId[..16]);
         tokenStore.Delete();
         Profile = null;
         accessToken = null;
@@ -107,5 +125,27 @@ public sealed class Session
     {
         Progress.Activate(Profile?.ProfileId);
         History.Activate(Profile?.ProfileId);
+    }
+
+    private void ActivateSync() =>
+        ProgressSync?.Activate(Profile?.ProfileId, Profile?.AccountKey, accessToken ?? Profile?.AccessToken);
+
+    /// Fills in AccountKey on profiles stored before stage 2 so sync can turn on without a
+    /// fresh sign-in. Fire-and-forget from the constructor; every failure is swallowed —
+    /// sync simply stays off until the next launch retries this.
+    private async Task BackfillAccountKeyAsync()
+    {
+        try
+        {
+            if (Profile is not { AccountKey: null }) return;
+            var info = await RunAsync(t => Accounts.LoadAsync(t));
+            Profile = Profile with { AccountKey = info.Key };
+            tokenStore.Save(Profile);
+            ActivateSync();
+        }
+        catch
+        {
+            // Swallowed: sync stays off until next launch.
+        }
     }
 }

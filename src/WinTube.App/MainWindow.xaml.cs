@@ -15,10 +15,15 @@ public sealed partial class MainWindow : Window
 
     private readonly DispatcherQueue dispatcher = DispatcherQueue.GetForCurrentThread();
 
+    /// Throttles the Activated-triggered sync so rapid focus churn doesn't hammer the backend.
+    private DateTimeOffset lastSyncTrigger;
+
     public MainWindow()
     {
         InitializeComponent();
         App.Session.SignedOut += OnSessionSignedOut;
+        Activated += OnActivated;
+        Closed += OnClosed;
         ProfileName.Text = App.Session.Profile?.Name ?? "";
         if (App.Session.IsSignedIn)
         {
@@ -57,6 +62,19 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnSignOut(object sender, RoutedEventArgs e) => App.Session.SignOut();
+
+    /// Coming back into focus is a good moment to pull in anything synced from another
+    /// device — throttled so switching apps back and forth doesn't hammer the backend.
+    private void OnActivated(object sender, WindowActivatedEventArgs e)
+    {
+        if (e.WindowActivationState == WindowActivationState.Deactivated) return;
+        var now = DateTimeOffset.UtcNow;
+        if (now - lastSyncTrigger <= TimeSpan.FromSeconds(60)) return;
+        lastSyncTrigger = now;
+        App.Session.ProgressSync?.Sync();
+    }
+
+    private void OnClosed(object sender, WindowEventArgs e) => App.Session.ProgressSync?.FlushNow();
 
     /// Session.SignOut() raises this both for the manual sign-out above and for RunAsync
     /// giving up on a permanently failed refresh (which can happen from an async

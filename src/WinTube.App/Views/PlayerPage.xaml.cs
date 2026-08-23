@@ -47,6 +47,7 @@ public sealed partial class PlayerPage : Page
         base.OnNavigatedFrom(e);
         leftPage = true;
         ReportProgressOnce();
+        App.Session.ProgressSync?.FlushNow();
         TearDownPlayer();
     }
 
