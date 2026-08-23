@@ -11,6 +11,13 @@
     <Platforms>x64</Platforms>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Building inside a Visual Studio that lacks the C++ toolset, the XAML compiler's
+         GetVCInstallPath target crashes enumerating $(VsInstallRoot)\VC\Tools\MSVC. The
+         vcmeta.dll it is probing for is only consulted for C++ projects — CLI builds run
+         with it unset — so when the toolset is absent, point VCToolsInstallDir at a dummy
+         to skip the crashing probe. Remove if the "Desktop development with C++" workload
+         is ever installed (the condition then no-ops anyway). -->
+    <VCToolsInstallDir Condition="'$(VCToolsInstallDir)' == '' and '$(VsInstallRoot)' != '' and !Exists('$(VsInstallRoot)\VC\Tools\MSVC')">$(MSBuildThisFileDirectory)</VCToolsInstallDir>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.*" />
