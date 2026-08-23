@@ -28,6 +28,7 @@ public sealed class WatchProgressSync
     private CancellationTokenSource activation = new();
     private CancellationTokenSource? debounce;
     private Task<string?>? signInTask;
+    private readonly object signInGate = new();
 
     public Task? RunningTask { get; private set; }
 
@@ -118,12 +119,17 @@ public sealed class WatchProgressSync
     {
         if (target is not { } profile) return null;
         if (client.Session is { } session) return session.UserId;
-        if (signInTask is { } running) return await running;
 
-        var task = SignInOnceAsync(profile, ct);
-        signInTask = task;
+        Task<string?> task;
+        lock (signInGate)
+        {
+            task = signInTask ??= SignInOnceAsync(profile, ct);
+        }
         var userId = await task;
-        if (ReferenceEquals(signInTask, task)) signInTask = null;
+        lock (signInGate)
+        {
+            if (ReferenceEquals(signInTask, task)) signInTask = null;
+        }
         return target?.SyncId == profile.SyncId ? userId : null;
     }
 
@@ -144,9 +150,12 @@ public sealed class WatchProgressSync
         }
     }
 
-    private void InvalidateSession()
+    /// Only acts if `profile` — the profile whose request just failed — is still the live
+    /// target: a stale continuation from a profile Activate already switched away from must
+    /// not null out the session (or delete the stored one) of whoever is active now.
+    private void InvalidateSession(Target profile)
     {
-        if (target is not { } profile) return;
+        if (target?.SyncId != profile.SyncId) return;
         client.Session = null;
         sessions.Delete(profile.SyncId);
     }
@@ -190,7 +199,7 @@ public sealed class WatchProgressSync
                 catch (AppwriteException e) when (e.IsUnauthorized)
                 {
                     Log($"session rejected: {e.Message}");
-                    InvalidateSession();
+                    InvalidateSession(profile);
                     return;   // the mark is not advanced — nothing was recorded as caught up
                 }
 
@@ -282,7 +291,7 @@ public sealed class WatchProgressSync
                 catch (AppwriteException e) when (e.IsUnauthorized)
                 {
                     Log($"session rejected: {e.Message}");
-                    InvalidateSession();
+                    InvalidateSession(profile);
                     break;
                 }
                 catch (Exception e)

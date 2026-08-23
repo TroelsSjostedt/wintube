@@ -16,12 +16,23 @@ public sealed class WatchProgressStore(string rootDirectory, Func<DateTimeOffset
     private const double EndThreshold = 20;
 
     private readonly Func<DateTimeOffset> now = clock ?? (() => DateTimeOffset.UtcNow);
+    private readonly object gate = new();
     private Dictionary<string, ProgressEntry> entries = [];
     private HashSet<string> dirty = [];
     private string? profileId;
 
-    public IReadOnlyDictionary<string, ProgressEntry> Entries => entries;
-    public IReadOnlyCollection<string> Dirty => dirty;
+    /// Snapshot copy — callers (including the sync engine, from a thread-pool task) must
+    /// never enumerate the live collection while Report/Merge/etc. may be mutating it.
+    public IReadOnlyDictionary<string, ProgressEntry> Entries
+    {
+        get { lock (gate) return new Dictionary<string, ProgressEntry>(entries); }
+    }
+
+    public IReadOnlyCollection<string> Dirty
+    {
+        get { lock (gate) return dirty.ToList(); }
+    }
+
     public event Action? Changed;
 
     /// Raised by Report only — a real local playback write, the thing a sync should push.
@@ -32,30 +43,41 @@ public sealed class WatchProgressStore(string rootDirectory, Func<DateTimeOffset
     /// Points the store at a profile's history. Null when nobody is signed in.
     public void Activate(string? newProfileId)
     {
-        if (newProfileId == profileId) return;
-        profileId = newProfileId;
-        if (profileId is null) { entries = []; dirty = []; }
-        else (entries, dirty) = Load(profileId);
+        lock (gate)
+        {
+            if (newProfileId == profileId) return;
+            profileId = newProfileId;
+            if (profileId is null) { entries = []; dirty = []; }
+            else (entries, dirty) = Load(profileId);
+        }
         Changed?.Invoke();
     }
 
     public void Report(string videoId, double positionSeconds, double durationSeconds)
     {
-        if (profileId is null || durationSeconds <= 0) return;
-        if (positionSeconds < MinimumPosition) return;
-        if (durationSeconds - positionSeconds <= EndThreshold) positionSeconds = durationSeconds;
+        lock (gate)
+        {
+            if (profileId is null || durationSeconds <= 0) return;
+            if (positionSeconds < MinimumPosition) return;
+            if (durationSeconds - positionSeconds <= EndThreshold) positionSeconds = durationSeconds;
 
-        entries[videoId] = new ProgressEntry(positionSeconds, durationSeconds, now());
-        dirty.Add(videoId);
-        Persist();
+            entries[videoId] = new ProgressEntry(positionSeconds, durationSeconds, now());
+            dirty.Add(videoId);
+            Persist();
+        }
         Changed?.Invoke();
         LocalChanged?.Invoke();
     }
 
     /// Null when there is nothing to resume — no entry, or the video was finished.
-    public double? ResumePosition(string videoId) =>
-        entries.TryGetValue(videoId, out var entry) &&
-        entry.PositionSeconds < entry.DurationSeconds ? entry.PositionSeconds : null;
+    public double? ResumePosition(string videoId)
+    {
+        lock (gate)
+        {
+            return entries.TryGetValue(videoId, out var entry) &&
+                entry.PositionSeconds < entry.DurationSeconds ? entry.PositionSeconds : null;
+        }
+    }
 
     // MARK: syncing
 
@@ -64,17 +86,21 @@ public sealed class WatchProgressStore(string rootDirectory, Func<DateTimeOffset
     /// edit is newer than anything the backend can know about, so it wins and stays queued.
     public void Merge(IReadOnlyDictionary<string, ProgressEntry> remote)
     {
-        if (profileId is null) return;
-        var changed = false;
-        foreach (var (videoId, entry) in remote)
+        bool changed;
+        lock (gate)
         {
-            if (entries.TryGetValue(videoId, out var local) && local.UpdatedAt >= entry.UpdatedAt)
-                continue;
-            entries[videoId] = entry;
-            changed = true;
+            if (profileId is null) return;
+            changed = false;
+            foreach (var (videoId, entry) in remote)
+            {
+                if (entries.TryGetValue(videoId, out var local) && local.UpdatedAt >= entry.UpdatedAt)
+                    continue;
+                entries[videoId] = entry;
+                changed = true;
+            }
+            if (!changed) return;
+            Persist();
         }
-        if (!changed) return;
-        Persist();
         Changed?.Invoke();
     }
 
@@ -84,11 +110,14 @@ public sealed class WatchProgressStore(string rootDirectory, Func<DateTimeOffset
     /// just took FROM the backend.
     public void QueueAll(IReadOnlySet<string> except)
     {
-        if (profileId is null) return;
-        var owed = entries.Keys.Where(id => !except.Contains(id) && !dirty.Contains(id)).ToList();
-        if (owed.Count == 0) return;
-        foreach (var id in owed) dirty.Add(id);
-        Persist();
+        lock (gate)
+        {
+            if (profileId is null) return;
+            var owed = entries.Keys.Where(id => !except.Contains(id) && !dirty.Contains(id)).ToList();
+            if (owed.Count == 0) return;
+            foreach (var id in owed) dirty.Add(id);
+            Persist();
+        }
     }
 
     /// Drops pushed entries from the queue — but only those the user hasn't moved on from:
@@ -96,11 +125,14 @@ public sealed class WatchProgressStore(string rootDirectory, Func<DateTimeOffset
     /// and clearing that would strand the newer position.
     public void MarkSynced(IReadOnlyDictionary<string, DateTimeOffset> pushed)
     {
-        if (profileId is null) return;
-        foreach (var (videoId, updatedAt) in pushed)
-            if (entries.TryGetValue(videoId, out var entry) && entry.UpdatedAt == updatedAt)
-                dirty.Remove(videoId);
-        Persist();
+        lock (gate)
+        {
+            if (profileId is null) return;
+            foreach (var (videoId, updatedAt) in pushed)
+                if (entries.TryGetValue(videoId, out var entry) && entry.UpdatedAt == updatedAt)
+                    dirty.Remove(videoId);
+            Persist();
+        }
     }
 
     // MARK: storage — <root>\profiles\<profileId>\watch-progress.json
