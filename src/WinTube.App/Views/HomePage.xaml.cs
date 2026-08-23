@@ -141,10 +141,11 @@ public sealed partial class HomePage : Page
 
     private static void RefreshProgress(IEnumerable<VideoCardViewModel> items)
     {
+        var entries = App.Session.Progress.Entries;
         foreach (var item in items)
         {
             item.ProgressFraction =
-                App.Session.Progress.Entries.TryGetValue(item.Video.Id, out var entry) &&
+                entries.TryGetValue(item.Video.Id, out var entry) &&
                 entry.DurationSeconds > 0
                     ? entry.PositionSeconds / entry.DurationSeconds
                     : 0;

@@ -75,10 +75,11 @@ public sealed partial class SearchPage : Page
 
     private void RefreshProgress()
     {
+        var entries = App.Session.Progress.Entries;
         foreach (var item in results)
         {
             item.ProgressFraction =
-                App.Session.Progress.Entries.TryGetValue(item.Video.Id, out var entry) &&
+                entries.TryGetValue(item.Video.Id, out var entry) &&
                 entry.DurationSeconds > 0
                     ? entry.PositionSeconds / entry.DurationSeconds
                     : 0;

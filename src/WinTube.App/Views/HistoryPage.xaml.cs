@@ -167,10 +167,11 @@ public sealed partial class HistoryPage : Page
 
     private void RefreshProgress()
     {
+        var entries = App.Session.Progress.Entries;
         foreach (var card in cards)
         {
             card.ProgressFraction =
-                App.Session.Progress.Entries.TryGetValue(card.Video.Id, out var entry) &&
+                entries.TryGetValue(card.Video.Id, out var entry) &&
                 entry.DurationSeconds > 0
                     ? entry.PositionSeconds / entry.DurationSeconds
                     : 0;
