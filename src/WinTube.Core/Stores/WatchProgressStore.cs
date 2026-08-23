@@ -24,6 +24,11 @@ public sealed class WatchProgressStore(string rootDirectory, Func<DateTimeOffset
     public IReadOnlyCollection<string> Dirty => dirty;
     public event Action? Changed;
 
+    /// Raised by Report only — a real local playback write, the thing a sync should push.
+    /// Merges deliberately do not raise it: pushing back what the backend just sent would
+    /// be a round trip that changes nothing.
+    public event Action? LocalChanged;
+
     /// Points the store at a profile's history. Null when nobody is signed in.
     public void Activate(string? newProfileId)
     {
@@ -44,12 +49,59 @@ public sealed class WatchProgressStore(string rootDirectory, Func<DateTimeOffset
         dirty.Add(videoId);
         Persist();
         Changed?.Invoke();
+        LocalChanged?.Invoke();
     }
 
     /// Null when there is nothing to resume — no entry, or the video was finished.
     public double? ResumePosition(string videoId) =>
         entries.TryGetValue(videoId, out var entry) &&
         entry.PositionSeconds < entry.DurationSeconds ? entry.PositionSeconds : null;
+
+    // MARK: syncing
+
+    /// Folds in what the backend has, keeping whichever version of each video is newer.
+    /// Last-writer-wins by UpdatedAt — the right rule for one household: an unpushed local
+    /// edit is newer than anything the backend can know about, so it wins and stays queued.
+    public void Merge(IReadOnlyDictionary<string, ProgressEntry> remote)
+    {
+        if (profileId is null) return;
+        var changed = false;
+        foreach (var (videoId, entry) in remote)
+        {
+            if (entries.TryGetValue(videoId, out var local) && local.UpdatedAt >= entry.UpdatedAt)
+                continue;
+            entries[videoId] = entry;
+            changed = true;
+        }
+        if (!changed) return;
+        Persist();
+        Changed?.Invoke();
+    }
+
+    /// Queues everything the device already knows, so a history that predates syncing is
+    /// uploaded rather than sitting there being older than a backend that never heard of it.
+    /// Run once per profile, after its first successful pull; `except` names what that pull
+    /// just took FROM the backend.
+    public void QueueAll(IReadOnlySet<string> except)
+    {
+        if (profileId is null) return;
+        var owed = entries.Keys.Where(id => !except.Contains(id) && !dirty.Contains(id)).ToList();
+        if (owed.Count == 0) return;
+        foreach (var id in owed) dirty.Add(id);
+        Persist();
+    }
+
+    /// Drops pushed entries from the queue — but only those the user hasn't moved on from:
+    /// a video still playing while its position uploads gets a newer UpdatedAt mid-flight,
+    /// and clearing that would strand the newer position.
+    public void MarkSynced(IReadOnlyDictionary<string, DateTimeOffset> pushed)
+    {
+        if (profileId is null) return;
+        foreach (var (videoId, updatedAt) in pushed)
+            if (entries.TryGetValue(videoId, out var entry) && entry.UpdatedAt == updatedAt)
+                dirty.Remove(videoId);
+        Persist();
+    }
 
     // MARK: storage — <root>\profiles\<profileId>\watch-progress.json
 
