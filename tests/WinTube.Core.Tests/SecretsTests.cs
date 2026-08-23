@@ -28,4 +28,35 @@ public class SecretsTests
         Assert.Equal("", secrets.OAuthClientId);
         Assert.Equal("", secrets.OAuthClientSecret);
     }
+
+    [Fact]
+    public void Load_ReadsOptionalAppwriteValues()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        File.WriteAllText(path, """
+            {"innerTubeApiKey":"K","oauthClientId":"I","oauthClientSecret":"S",
+             "appwriteHost":"appwrite.example.dk","appwriteProjectId":"metube"}
+            """);
+        try
+        {
+            var secrets = Secrets.Load(path);
+            Assert.Equal("appwrite.example.dk", secrets.AppwriteHost);
+            Assert.Equal("metube", secrets.AppwriteProjectId);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Load_AbsentAppwriteValues_AreEmpty()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        File.WriteAllText(path, """{"innerTubeApiKey":"K"}""");
+        try
+        {
+            var secrets = Secrets.Load(path);
+            Assert.Equal("", secrets.AppwriteHost);
+            Assert.Equal("", secrets.AppwriteProjectId);
+        }
+        finally { File.Delete(path); }
+    }
 }
