@@ -35,4 +35,22 @@ public class TokenStoreTests
         File.WriteAllText(Path.Combine(dir, "tokens.bin"), "garbage");
         Assert.Null(new TokenStore(dir).Load());
     }
+
+    [Fact]
+    public void SaveLoad_RoundTripsAccountKey()
+    {
+        var dir = TempDir();
+        var store = new TokenStore(dir);
+        var profile = new StoredProfile("pid", "Name", null, "AT", "RT", "GAIA123");
+        store.Save(profile);
+        Assert.Equal("GAIA123", store.Load()!.AccountKey);
+    }
+
+    [Fact]
+    public void Load_ProfileSavedWithoutAccountKey_HasNull()
+    {
+        var dir = TempDir();
+        new TokenStore(dir).Save(new StoredProfile("pid", "Name", null, "AT", "RT"));
+        Assert.Null(new TokenStore(dir).Load()!.AccountKey);
+    }
 }

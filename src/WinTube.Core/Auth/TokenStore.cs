@@ -6,7 +6,9 @@ using System.Text.Json;
 namespace WinTube.Core.Auth;
 
 public sealed record StoredProfile(
-    string ProfileId, string Name, string? AvatarUrl, string AccessToken, string RefreshToken);
+    string ProfileId, string Name, string? AvatarUrl, string AccessToken, string RefreshToken,
+    /// The raw YouTube account key (obfuscated Gaia id), needed by the sync's auth function; null in profiles stored before stage 2, backfilled on the next launch.
+    string? AccountKey = null);
 
 /// The one secret the app holds: the OAuth token pair, DPAPI-encrypted per user — the Windows
 /// stand-in for the tvOS Keychain. Everything else (watch progress, history) is plain JSON.
