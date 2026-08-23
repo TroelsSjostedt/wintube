@@ -56,7 +56,7 @@ tests/WinTube.Core.Tests/WatchProgressSyncTests.cs
 - Consumes: `Secrets` (v1).
 - Produces: `Secrets` gains `string AppwriteHost` and `string AppwriteProjectId` (both `""` when absent — same policy as the existing keys). Namespace `WinTube.Core.Sync`: `sealed record AppwriteConfig(string Endpoint, string ProjectId)` with `static AppwriteConfig? FromSecrets(Secrets secrets)` (null unless both values are non-empty; `Endpoint = $"https://{host}/v1"`), and constants `const string DatabaseId = "metube"`, `const string TableId = "watchProgress"`, `const string AuthFunctionId = "metube-auth"`, `const string Origin = "appwrite-tvos://dk.delectosoft.metube"`, `const string ResponseFormat = "1.9.5"`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/WinTube.Core.Tests/SecretsTests.cs`:
 
@@ -92,6 +92,8 @@ Append to `tests/WinTube.Core.Tests/SecretsTests.cs`:
         finally { File.Delete(path); }
     }
 ```
+
+- [x] **Step 2: Run tests to verify they fail**
 
 New `tests/WinTube.Core.Tests/AppwriteConfigTests.cs`:
 
@@ -190,11 +192,13 @@ Also add the two keys (empty) to `secrets.example.json` with a one-line comment 
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 3: Implement**
+
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (previous count + 4).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: optional Appwrite configuration in secrets"
@@ -268,11 +272,13 @@ public class AppwriteQueryTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 1: Write the failing tests**
+
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: compile FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/WinTube.Core/Sync/AppwriteQuery.cs`:
 
@@ -310,11 +316,11 @@ public static class AppwriteQuery
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (+5).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: Appwrite query-string builders"
@@ -339,7 +345,7 @@ git add -A && git commit -m "feat: Appwrite query-string builders"
     - `Task UpsertRowAsync(string rowId, IReadOnlyDictionary<string, object?> data, IReadOnlyList<string> permissions, CancellationToken ct = default)` — PUT `/tablesdb/metube/tables/watchProgress/rows/{rowId}` body `{"data": …, "permissions": …}`.
   - Every call: headers per Global Constraints; `Cookie: {Session.Cookie}` when a session is set; error body parsed regardless of status and `message` used; 401 → `AppwriteException` with `IsUnauthorized` true.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/WinTube.Core.Tests/AppwriteClientTests.cs`:
 
@@ -467,11 +473,11 @@ public class AppwriteClientTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: compile FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/WinTube.Core/Sync/AppwriteClient.cs`:
 
@@ -654,11 +660,11 @@ public sealed class AppwriteClient(HttpClient http, AppwriteConfig config)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (+5).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: hand-rolled Appwrite client (sign-in, list, upsert)"
@@ -676,7 +682,7 @@ git add -A && git commit -m "feat: hand-rolled Appwrite client (sign-in, list, u
 - Consumes: `AppwriteSession` (Task 3).
 - Produces (namespace `WinTube.Core.Sync`): `sealed class AppwriteSessionStore(string rootDirectory)` (annotated `[SupportedOSPlatform("windows")]`) with `void Save(string profileId, AppwriteSession session)`, `AppwriteSession? Load(string profileId)`, `void Delete(string profileId)`. DPAPI-protected JSON at `<root>\profiles\<profileId>\appwrite-session.bin`; `Load` returns null on missing/corrupt/undecryptable. Same pattern as `TokenStore` — the cookie authenticates requests, so it gets the same protection the OAuth tokens do.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/WinTube.Core.Tests/AppwriteSessionStoreTests.cs`:
 
@@ -779,11 +785,15 @@ public sealed class AppwriteSessionStore(string rootDirectory)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 2: Run tests to verify they fail**
+
+- [x] **Step 3: Implement**
+
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (+2).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: DPAPI-protected Appwrite session store"
@@ -806,7 +816,7 @@ git add -A && git commit -m "feat: DPAPI-protected Appwrite session store"
 
 These are the tvOS `merge(remote:)`, `queueAll(except:)`, `markSynced(_:)` semantics verbatim (see `WatchProgressStore.swift:192-234`).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/WinTube.Core.Tests/WatchProgressStoreSyncTests.cs`:
 
@@ -988,11 +998,15 @@ raise it at the end of `Report` (after `Changed?.Invoke()`), and add:
 
 (`profileId`, `entries`, `dirty`, `Persist` already exist with these names in the v1 file.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 2: Run tests to verify they fail**
+
+- [x] **Step 3: Implement**
+
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (+6), all pre-existing tests still green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: watch-progress store sync primitives (merge, queue, mark-synced)"
@@ -1009,7 +1023,7 @@ git add -A && git commit -m "feat: watch-progress store sync primitives (merge, 
 **Interfaces:**
 - Produces: `StoredProfile` gains a trailing optional positional parameter `string? AccountKey = null` — the raw YouTube account key (obfuscated Gaia id) that the metube-auth function verifies. Optional-with-default keeps both the existing 5-argument construction sites and old serialized tokens.bin files (missing property → null) working. Task 8 backfills it via `accounts_list` when null.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/WinTube.Core.Tests/TokenStoreTests.cs`:
 
@@ -1033,11 +1047,11 @@ Append to `tests/WinTube.Core.Tests/TokenStoreTests.cs`:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: compile FAIL (6th argument).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```csharp
 public sealed record StoredProfile(
@@ -1047,11 +1061,11 @@ public sealed record StoredProfile(
 
 with a doc comment on the new parameter's line: the raw YouTube account key (obfuscated Gaia id), needed by the sync's auth function; null in profiles stored before stage 2, backfilled on the next launch.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (+2).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: persist the raw account key alongside the tokens"
@@ -1095,7 +1109,7 @@ Behavior to port from `WatchProgressSync.swift` (the Swift file is the arbiter):
 - **Failure policy**: every network/auth failure is caught inside the engine; nothing ever escapes to callers. Debug-log via `System.Diagnostics.Debug.WriteLine("[WatchProgressSync] …")`.
 - **Concurrency**: the engine is called from the UI thread; each Activate creates a fresh `CancellationTokenSource` whose token guards all async continuations (check `ct.IsCancellationRequested` after every await before touching state; also compare a captured activation generation so a stale continuation can't write another profile's data).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/WinTube.Core.Tests/WatchProgressSyncTests.cs` — a stub-HTTP harness that scripts server behavior. All 64-hex profile ids in tests use `new string('a', 64)` so `syncId` is `"aaaaaaaaaaaaaaaa"` and `userId` is `"ytaaaaaaaaaaaaaaaa"`:
 
@@ -1628,11 +1642,15 @@ public sealed class WatchProgressSync
 
 Porting note: `WatchProgressStore` raises `LocalChanged` synchronously on the caller's thread (the UI thread in the app, the test thread in tests); the engine hops to the thread pool for all network work, and the store's own members are only touched from `Merge`/`QueueAll`/`MarkSynced` calls that the store serializes by being effectively single-threaded per the v1 review — acceptable at this app's volume, and the same shape the tvOS actor gives. If the store's `Persist` proves racy under the thread-pool calls, marshal the three store calls back through a captured `SynchronizationContext` — but only if a test or review demonstrates the race.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 2: Run tests to verify they fail**
+
+- [x] **Step 3: Implement**
+
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (+7).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: local-first watch-progress sync engine"
@@ -1663,13 +1681,13 @@ Changes, all small and mechanical:
 6. **MainWindow**: subscribe `Activated` — when `e.WindowActivationState != WindowActivationState.Deactivated` and more than 60 s have passed since the last sync trigger (`DateTimeOffset` field), call `App.Session.ProgressSync?.Sync()`. Subscribe `Closed` → `App.Session.ProgressSync?.FlushNow()`.
 7. **PlayerPage.OnNavigatedFrom**: after the existing final `Report`, call `App.Session.ProgressSync?.FlushNow()`.
 
-- [ ] **Step 1: Implement the wiring** per the list above.
+- [x] **Step 1: Implement the wiring** per the list above.
 
-- [ ] **Step 2: Build and test**
+- [x] **Step 2: Build and test**
 
 Run: `dotnet build src/WinTube.App -p:Platform=x64` — expected: clean. `dotnet test tests/WinTube.Core.Tests` — expected: all green (no new tests; the wiring is exercised live in Task 9).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A && git commit -m "feat: wire watch-progress sync into session, window and player"
@@ -1682,14 +1700,16 @@ git add -A && git commit -m "feat: wire watch-progress sync into session, window
 **Files:**
 - Modify: `README.md`, `docs/superpowers/plans/2026-08-23-wintube-sync.md` (tick outcomes)
 
-- [ ] **Step 1: README** — add a "Watch-progress sync" section: optional feature; add `appwriteHost` (host only, no scheme) and `appwriteProjectId` to `%LOCALAPPDATA%\WinTube\secrets.json`; empty = off; the backend is the metube repo's `Backend/` project; sign-out keeps the backend copy by design. Keep the metube README voice.
+- [x] **Step 1: README** — add a "Watch-progress sync" section: optional feature; add `appwriteHost` (host only, no scheme) and `appwriteProjectId` to `%LOCALAPPDATA%\WinTube\secrets.json`; empty = off; the backend is the metube repo's `Backend/` project; sign-out keeps the backend copy by design. Keep the metube README voice.
 
 - [ ] **Step 2: LIVE VERIFICATION (the user)** — with real values in secrets.json:
+
+*Deferred: needs real Appwrite values and both devices; the user runs this.*
   1. Launch, play something for >30 s, close the player, wait ~15 s → row visible in the Appwrite console (or resume position appears on the Apple TV).
   2. Watch something on the Apple TV → reopen WinTube (or alt-tab to it after 60 s) → the video shows the TV's position.
   3. Sign out and back in on Windows → history restored from the backend.
 
-- [ ] **Step 3: Final test run**
+- [x] **Step 3: Final test run**
 
 Run: `dotnet test tests/WinTube.Core.Tests` and `dotnet build src/WinTube.App -p:Platform=x64` — all green.
 
@@ -1698,6 +1718,8 @@ Run: `dotnet test tests/WinTube.Core.Tests` and `dotnet build src/WinTube.App -p
 ```bash
 git add -A && git commit -m "docs: watch-progress sync README and verification"
 ```
+
+(Will tick after commit.)
 
 ---
 

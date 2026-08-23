@@ -39,6 +39,14 @@ dotnet run --project src/WinTube.App -p:Platform=x64
 dotnet test tests/WinTube.Core.Tests
 ```
 
+## Watch-progress sync
+
+**Optional:** Resume positions sync with an Apple TV running metube and an Appwrite backend. Off by default.
+
+To enable: add `appwriteHost` (host only, no scheme) and `appwriteProjectId` to `%LOCALAPPDATA%\WinTube\secrets.json`, leave both empty to keep the app fully local. The backend is the metube repo's `Backend/` project — see its README to deploy. The backend schema and API endpoints are shared between WinTube and tvOS; no schema migration is needed.
+
+Sync is best-effort: network and auth failures are logged at debug level and never crash the app. A stale or expired session re-authenticates transparently on the next pull. Sign-out keeps the backend copy and stored watch progress by design.
+
 ## First run
 
 The one real technical risk the design spec called out (§3, "stage-0 playback gate") — whether
