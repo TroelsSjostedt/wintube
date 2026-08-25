@@ -1,0 +1,117 @@
+<title>WinTube Links</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5; --ink: #24211E; --muted: #6B645C; --accent: #A63D2F;
+    --line: #E4DFD8; --card: #FFFFFF; --code-bg: #F1EDE7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+      --line: #35302B; --card: #242019; --code-bg: #262119;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+    --line: #35302B; --card: #242019; --code-bg: #262119;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: "Public Sans", "Segoe UI", system-ui, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; padding: 0 1.25rem 6rem; }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2 { font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  p { margin: .75rem 0; }
+  a { color: var(--accent); }
+  code, pre { font-family: "IBM Plex Mono", Consolas, monospace; font-size: .85em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.25rem; overflow-x: auto; line-height: 1.5; }
+  .eyebrow { font-family: "Schibsted Grotesk", sans-serif; font-size: .72rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 3.5rem 0 .25rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; color: var(--muted); font-size: .85rem; margin: 1rem 0 0; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: "Schibsted Grotesk", sans-serif; font-size: .78rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: .4rem .75rem .4rem 0; }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .75rem .55rem 0; vertical-align: top; }
+  td:first-child, th:first-child { padding-left: 0; }
+  .callout { border-left: 3px solid var(--accent); background: var(--card); border-radius: 0 8px 8px 0; padding: .75rem 1.25rem; margin: 1.25rem 0; }
+  ul { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Stage 4 · Approved 2026-08-25</p>
+  <h1>WinTube Links</h1>
+  <p>Two user-requested features as one small stage: copy a video's YouTube URL from the
+  player — with or without the current position — and open YouTube links <em>in</em> WinTube.</p>
+  <div class="meta">
+    <span><b>UI decision</b> SplitButton (Azure DevOps-style): left half copies, chevron offers the timestamped copy</span>
+    <span><b>Base</b> WinTube v1 + sync + SponsorBlock</span>
+  </div>
+</header>
+
+<h2>1 · Shared core — <code>WinTube.Core.Links.YouTubeLink</code></h2>
+<div class="table-wrap"><table>
+  <tr><th>Member</th><th>Contract</th></tr>
+  <tr><td><code>For(videoId, at?)</code></td><td><code>https://youtu.be/{id}</code>; with a position, <code>?t={whole seconds}</code>. Sub-minute positions (&lt; 5 s) still emit the parameter when asked — the caller decides by offering the menu item or not.</td></tr>
+  <tr><td><code>TryParse(text)</code></td><td>→ <code>(VideoId, StartAt?)</code> or null. Accepts absolute http(s) URLs on hosts <code>youtu.be</code>, <code>youtube.com</code>, <code>www.youtube.com</code>, <code>m.youtube.com</code>, <code>music.youtube.com</code> with paths <code>/watch?v={id}</code>, <code>/{id}</code> (youtu.be only), <code>/shorts/{id}</code>, <code>/embed/{id}</code>, <code>/live/{id}</code>; and <code>wintube:</code> URIs using the same watch grammar (<code>wintube://watch?v={id}&amp;t=90</code>). Start time from <code>t=</code> or <code>start=</code>: raw seconds (<code>754</code>), with suffix (<code>754s</code>), or <code>1h2m3s</code> form. Video ids are the 11-char <code>[A-Za-z0-9_-]</code> shape; anything else → null. Never treats bare text as an id (a search for an 11-letter word must stay a search).</td></tr>
+  <tr><td><code>Format(position)</code></td><td>Position as the menu shows it: <code>12:34</code> / <code>1:02:34</code>.</td></tr>
+</table></div>
+
+<h2>2 · Copy from the player</h2>
+<ul>
+  <li>A <code>SplitButton</code> in the player's title bar, right of the title: primary half —
+  link icon + "Copy link" — copies <code>For(id)</code> immediately; the chevron opens a flyout
+  with one item, <em>"Copy link at 12:34"</em> (live position at open time), copying
+  <code>For(id, position)</code>.</li>
+  <li>Both confirm with the player's existing toast ("Link copied").</li>
+  <li>Clipboard via <code>DataPackage</code> + <code>Clipboard.SetContent</code>, as the login
+  page already does.</li>
+</ul>
+
+<h2>3 · Opening links — three ways in</h2>
+<div class="table-wrap"><table>
+  <tr><th>Way in</th><th>Behaviour</th></tr>
+  <tr><td>Search box</td><td>A query that <code>TryParse</code>s is not searched: SearchPage navigates straight to the player with the parsed id and start time.</td></tr>
+  <tr><td>Command line</td><td><code>WinTube.App.exe &lt;url&gt;</code> — the first argument that parses opens the player after the shell is up (signed-in only; signed out, the app just opens normally).</td></tr>
+  <tr><td><code>wintube://</code> protocol</td><td>Registered idempotently at startup under <code>HKCU\Software\Classes\wintube</code> (URL Protocol, <code>shell\open\command = "&lt;exe&gt;" "%1"</code>). Activation parses the URI the same way.</td></tr>
+</table></div>
+<ul>
+  <li><b>Single instance:</b> <code>AppInstance.FindOrRegisterForKey("wintube-main")</code> in a
+  custom <code>Main</code> (<code>DISABLE_XAML_GENERATED_MAIN</code>); a second launch redirects
+  its activation to the running instance and exits, and the running instance's
+  <code>Activated</code> handler (marshalled to the UI thread) opens the player and fronts the
+  window.</li>
+  <li><b>Start time wins:</b> a parsed <code>StartAt</code> overrides the stored resume position
+  for that playback — the player's navigation parameter becomes
+  <code>PlayerRequest(VideoItem Video, TimeSpan? StartAt)</code>; existing call sites pass
+  <code>StartAt: null</code>. Progress recording is unchanged from wherever playback actually is.</li>
+  <li>The opened video's card starts as a placeholder (id + fallback thumbnail) when the app has
+  never seen it; history's metadata lookup fills it in later, as History already does.</li>
+</ul>
+
+<div class="callout"><p><b>Honest limitation:</b> clicking a <code>youtube.com</code> link in a
+browser still opens the browser — Windows has no per-site handler for desktop apps short of
+becoming the default browser, which this app will not do. What this stage delivers is the three
+ways in above.</p></div>
+
+<h2>4 · Testing</h2>
+<ul>
+  <li><b>Unit:</b> <code>For</code> with/without position; <code>TryParse</code> matrix — every
+  accepted host/path shape, all three time forms, <code>start=</code>, wintube-grammar, and the
+  rejections (bare 11-char text, other hosts, malformed ids, non-URLs); <code>Format</code>
+  both shapes.</li>
+  <li><b>Manual (the user):</b> both copy actions land the right URL on the clipboard; pasting a
+  timestamped link in Search opens the player at that position; <code>start wintube://watch?v=…</code>
+  from a terminal opens/reuses the running app.</li>
+</ul>
+
+<h2>5 · Out of scope</h2>
+<p>Default-browser or per-site <code>youtube.com</code> registration, copy from video cards
+(fits the future channels/context-menu stage), playlist links, and Share-charm integration.</p>
+
+<p class="meta" style="border-bottom:none;border-top:1px solid var(--line);padding-top:1.5rem;margin-top:3rem;">
+<span>WinTube Links design · 2026-08-25 · approved in session (SplitButton per user's choice)</span></p>
+</main>
