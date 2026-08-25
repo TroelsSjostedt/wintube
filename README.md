@@ -53,7 +53,7 @@ The player automatically skips community-flagged interruptions — sponsor reads
 
 This **is NOT YouTube ad blocking**: pre-rolls and mid-rolls never reach the app. Only in-video segments that viewers submit are acted on.
 
-**Privacy:** Your videoId is never sent to SponsorBlock. The service takes the first 4 hex chars of its SHA-256 hash (the same prefix could match ~65,000 videos), returns every video whose hash starts with them, and the match happens on your device. SponsorBlock learns someone is watching one of those 65,000 videos, not which one.
+**Privacy:** Your videoId is never sent to SponsorBlock. Only the first 4 hex characters of its SHA-256 go to the server — a 1-in-65,536 slice of all of YouTube — which answers with every video in that slice, and the match happens on your device. The server never learns which video you are watching.
 
 **What gets skipped:** sponsor reads, self-promotion, subscribe reminders, and non-music sections in music videos — the four unambiguously not-the-video categories. Intros, outros, recaps, and filler are editorial parts of the video itself; plenty of people want them, so they're parsed but never skipped. No settings UI.
 
