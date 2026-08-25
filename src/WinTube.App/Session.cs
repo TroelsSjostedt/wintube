@@ -4,6 +4,7 @@ using WinTube.Core.Feed;
 using WinTube.Core.InnerTube;
 using WinTube.Core.Player;
 using WinTube.Core.Search;
+using WinTube.Core.SponsorBlock;
 using WinTube.Core.Stores;
 using WinTube.Core.Sync;
 
@@ -27,6 +28,7 @@ public sealed class Session
     public SearchService Search { get; }
     public StreamService Streams { get; }
     public VideoMetadataService Metadata { get; }
+    public SponsorBlockService SponsorBlock { get; }
     public WatchProgressStore Progress { get; } = new(DataDirectory);
     public WatchHistoryStore History { get; } = new(DataDirectory);
     public WatchProgressSync? ProgressSync { get; }
@@ -49,6 +51,7 @@ public sealed class Session
         var visitorData = new VisitorDataStore(http);
         Streams = new StreamService(InnerTube, visitorData);
         Metadata = new VideoMetadataService(InnerTube, visitorData);
+        SponsorBlock = new SponsorBlockService(http);
 
         var appwrite = AppwriteConfig.FromSecrets(secrets);
         if (appwrite is not null)

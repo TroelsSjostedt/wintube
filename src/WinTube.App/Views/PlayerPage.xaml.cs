@@ -8,6 +8,7 @@ using Windows.Media.Streaming.Adaptive;
 using WinTube.Core.InnerTube;
 using WinTube.Core.Models;
 using WinTube.Core.Player;
+using WinTube.Core.SponsorBlock;
 
 namespace WinTube.App.Views;
 
@@ -30,6 +31,11 @@ public sealed partial class PlayerPage : Page
     private bool handledFailure;
     private bool leftPage;
 
+    private IReadOnlyList<SponsorSegment> sponsorSegments = [];
+    private readonly HashSet<string> sponsorSkipped = [];
+    private DispatcherQueueTimer? sponsorTimer;
+    private DispatcherQueueTimer? toastTimer;
+
     public PlayerPage() => InitializeComponent();
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -49,6 +55,11 @@ public sealed partial class PlayerPage : Page
         ReportProgressOnce();
         App.Session.ProgressSync?.FlushNow();
         TearDownPlayer();
+
+        sponsorTimer?.Stop();
+        toastTimer?.Stop();
+        sponsorSegments = [];
+        sponsorSkipped.Clear();
     }
 
     // MARK: resolve + play
@@ -167,6 +178,7 @@ public sealed partial class PlayerPage : Page
                 hasPlayed = true;
                 App.Session.History.Record(video!);
                 StartProgressTimer();
+                _ = LoadSponsorSegmentsAsync();
             }
         });
 
@@ -205,6 +217,70 @@ public sealed partial class PlayerPage : Page
         if (video is null || player is not { } p) return;
         var session = p.PlaybackSession;
         App.Session.Progress.Report(video.Id, session.Position.TotalSeconds, session.NaturalDuration.TotalSeconds);
+    }
+
+    // MARK: SponsorBlock
+
+    /// Fired after playback has started, so a slow SponsorBlock server can never delay the
+    /// first frame. Failures yield an empty list inside the service; nothing to catch here
+    /// beyond the page-left guard.
+    private async Task LoadSponsorSegmentsAsync()
+    {
+        var segments = await App.Session.SponsorBlock.FetchSegmentsAsync(video!.Id);
+        if (leftPage || segments.Count == 0) return;
+        sponsorSegments = segments;
+        StartSponsorTimer();
+    }
+
+    /// Polls rather than using position events: a resume landing mid-sponsor or the user
+    /// scrubbing into one would sail straight past a start-boundary event. A quarter-second
+    /// tick is one comparison against a handful of ranges. The Tick handler is subscribed only
+    /// the first time the timer is created, so a ladder retry re-entering this method never
+    /// stacks a second handler.
+    private void StartSponsorTimer()
+    {
+        if (sponsorTimer is null)
+        {
+            sponsorTimer = dispatcher.CreateTimer();
+            sponsorTimer.Interval = TimeSpan.FromMilliseconds(250);
+            sponsorTimer.Tick += OnSponsorTick;
+        }
+        sponsorTimer.Start();
+    }
+
+    private void OnSponsorTick(DispatcherQueueTimer sender, object args)
+    {
+        if (leftPage || player?.PlaybackSession is not { } session) return;
+        if (session.PlaybackState != MediaPlaybackState.Playing) return;
+        var time = session.Position.TotalSeconds;
+        if (SponsorSegment.NextToSkip(sponsorSegments, time, sponsorSkipped) is not { } segment)
+            return;
+
+        sponsorSkipped.Add(segment.Id);
+        // A segment running to the end has nothing to seek to — clamping to the duration
+        // parks playback at the last frame, which is what "the video is over" looks like.
+        var duration = session.NaturalDuration.TotalSeconds;
+        var target = duration > 0 ? Math.Min(segment.End, duration) : segment.End;
+        session.Position = TimeSpan.FromSeconds(target);
+        ShowSkipToast($"Skipped {segment.Category.DisplayName()} · {segment.Duration:F0}s");
+    }
+
+    /// A newer skip replaces the toast and owns its timer, so back-to-back skips don't have
+    /// the first skip's timer hide the second skip's message. The hide-toast Tick handler is
+    /// subscribed only the first time the timer is created, mirroring the sponsor timer above.
+    private void ShowSkipToast(string message)
+    {
+        SkipToastText.Text = message;
+        SkipToast.Visibility = Visibility.Visible;
+        toastTimer?.Stop();
+        if (toastTimer is null)
+        {
+            toastTimer = dispatcher.CreateTimer();
+            toastTimer.Interval = TimeSpan.FromSeconds(3);
+            toastTimer.IsRepeating = false;
+            toastTimer.Tick += (_, _) => SkipToast.Visibility = Visibility.Collapsed;
+        }
+        toastTimer.Start();
     }
 
     // MARK: teardown + UI state

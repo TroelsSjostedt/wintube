@@ -13,6 +13,13 @@
         <Grid Grid.Row="1">
             <MediaPlayerElement x:Name="Player" AreTransportControlsEnabled="True"/>
 
+            <Border x:Name="SkipToast" Visibility="Collapsed"
+                    VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,96"
+                    Background="{ThemeResource SystemControlBackgroundAltHighBrush}"
+                    CornerRadius="6" Padding="16,8" IsHitTestVisible="False">
+                <TextBlock x:Name="SkipToastText" Style="{ThemeResource BodyTextBlockStyle}"/>
+            </Border>
+
             <ProgressRing x:Name="LoadingRing" IsActive="True" Width="64" Height="64"
                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
