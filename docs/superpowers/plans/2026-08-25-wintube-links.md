@@ -473,7 +473,7 @@ git add -A && git commit -m "feat: single-instance activation, wintube protocol,
 - [x] **Step 2: Tick the executed checkboxes** in this plan (UTF-8-safe tooling — the file carries em-dashes).
 
 - [ ] **Step 3: MANUAL VERIFICATION (the user)**
-  *Deferred: the user verifies clipboard, search-URL and protocol activation.*
+  *Partially verified 2026-08-25: both copy actions confirmed by the user (with and without timestamp). Search-URL open and wintube:// activation still pending.*
   1. Copy link → clipboard holds `https://youtu.be/{id}`; chevron → "Copy link at 12:34" → `?t=754`.
   2. Paste a timestamped YouTube link in Search → the player opens at that position.
   3. With the app running: `start wintube://watch?v=dQw4w9WgXcQ` in a terminal → the existing window fronts and plays; with the app closed, the same command starts it and plays.

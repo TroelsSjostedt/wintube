@@ -607,8 +607,8 @@ git add -A && git commit -m "feat: skip SponsorBlock segments in the player with
 
 - [x] **Step 2: Tick the executed checkboxes** in this plan (edit with UTF-8-safe tooling — the file carries em-dashes; PowerShell 5.1 Get-Content/Set-Content mangles them).
 
-- [ ] **Step 3: MANUAL VERIFICATION (the user)** — leave unticked with an italic deferral note until done:
-  *Deferred: the user verifies against a real video.*
+- [x] **Step 3: MANUAL VERIFICATION (the user)**
+  *Verified 2026-08-25 by the user: sponsor segments skip with the toast on real videos.*
   1. Play a video with a known sponsor read (most large tech/podcast channels) → it skips with a "Skipped Sponsor · Ns" toast.
   2. Rewind into the skipped stretch → it plays normally.
   3. A video with no segments plays exactly as before.
