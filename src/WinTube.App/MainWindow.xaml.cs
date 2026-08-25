@@ -38,6 +38,23 @@ public sealed partial class MainWindow : Window
 
     public Frame Frame => RootFrame;
 
+    /// Entry point for a wintube:// activation or a command-line argument: signed-out is a
+    /// no-op (LoginPage is already showing), otherwise fronts the window and navigates
+    /// straight to the player with a placeholder VideoItem — the player fills in the rest.
+    public void OpenVideo(string videoId, TimeSpan? startAt)
+    {
+        if (!App.Session.IsSignedIn) return;
+        this.Activate();
+        RootFrame.Navigate(typeof(Views.PlayerPage), new PlayerRequest(
+            new Core.Models.VideoItem
+            {
+                Id = videoId,
+                Title = "",
+                ThumbnailUrl = Core.Models.VideoItem.FallbackThumbnail(videoId),
+            },
+            startAt));
+    }
+
     /// Called by LoginPage right after CompleteSignInAsync, before it navigates the frame to
     /// HomePage itself — refreshes the footer and resets the pane highlight to Home.
     public void OnSignedIn()

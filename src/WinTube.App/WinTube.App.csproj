@@ -18,6 +18,7 @@
          to skip the crashing probe. Remove if the "Desktop development with C++" workload
          is ever installed (the condition then no-ops anyway). -->
     <VCToolsInstallDir Condition="'$(VCToolsInstallDir)' == '' and '$(VsInstallRoot)' != '' and !Exists('$(VsInstallRoot)\VC\Tools\MSVC')">$(MSBuildThisFileDirectory)</VCToolsInstallDir>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.*" />

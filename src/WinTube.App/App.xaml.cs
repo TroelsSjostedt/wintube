@@ -1,5 +1,8 @@
 using Microsoft.UI.Xaml;
+using Microsoft.Windows.AppLifecycle;
 using WinTube.Core;
+using WinTube.Core.Links;
+using ProtocolActivatedEventArgs = Windows.ApplicationModel.Activation.ProtocolActivatedEventArgs;
 
 namespace WinTube.App;
 
@@ -16,7 +19,67 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        ProtocolRegistration.EnsureRegistered();
+        AppInstance.GetCurrent().Activated += OnRedirectedActivation;
+
         Window = new MainWindow();
         Window.Activate();
+
+        try
+        {
+            var candidates = ActivationCandidates(AppInstance.GetCurrent().GetActivatedEventArgs())
+                .Concat(Environment.GetCommandLineArgs().Skip(1));
+            foreach (var candidate in candidates)
+            {
+                if (YouTubeLink.TryParse(candidate) is not { } link) continue;
+                Window.OpenVideo(link.VideoId, link.StartAt);
+                break;
+            }
+        }
+        catch
+        {
+            // A malformed initial activation must never crash startup.
+        }
+    }
+
+    /// Fires on a background thread when a second launch redirects here instead of starting
+    /// its own instance.
+    private void OnRedirectedActivation(object? sender, AppActivationArguments args)
+    {
+        try
+        {
+            var candidates = ActivationCandidates(args);
+            var window = Window;
+            if (window is null) return;
+            window.DispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    foreach (var candidate in candidates)
+                    {
+                        if (YouTubeLink.TryParse(candidate) is not { } link) continue;
+                        window.OpenVideo(link.VideoId, link.StartAt);
+                        break;
+                    }
+                }
+                catch
+                {
+                    // A malformed redirected activation must never crash the app.
+                }
+            });
+        }
+        catch
+        {
+            // A malformed redirected activation must never crash the app.
+        }
+    }
+
+    private static IEnumerable<string> ActivationCandidates(AppActivationArguments args)
+    {
+        if (args.Kind == ExtendedActivationKind.Protocol
+            && args.Data is ProtocolActivatedEventArgs protocolArgs)
+        {
+            yield return protocolArgs.Uri.ToString();
+        }
     }
 }
