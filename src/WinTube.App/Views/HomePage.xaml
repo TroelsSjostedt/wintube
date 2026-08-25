@@ -17,6 +17,7 @@
                                            Style="{StaticResource SubtitleTextBlockStyle}"/>
                                 <ListView ItemsSource="{x:Bind Items}"
                                           Tag="{x:Bind}"
+                                          Visibility="{x:Bind VideoRowVisibility}"
                                           SelectionMode="None"
                                           IsItemClickEnabled="False"
                                           ScrollViewer.HorizontalScrollBarVisibility="Auto"
@@ -31,6 +32,27 @@
                                         <DataTemplate x:DataType="local:VideoCardViewModel">
                                             <controls:VideoCard Video="{x:Bind Video}"
                                                 ProgressFraction="{x:Bind ProgressFraction, Mode=OneWay}"
+                                                Clicked="OnVideoCardClicked"/>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                                <ListView ItemsSource="{x:Bind Items}"
+                                          Tag="{x:Bind}"
+                                          Visibility="{x:Bind ShortRowVisibility}"
+                                          Height="267"
+                                          SelectionMode="None"
+                                          IsItemClickEnabled="False"
+                                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                          ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                          Loaded="OnRowLoaded">
+                                    <ListView.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="12"/>
+                                        </ItemsPanelTemplate>
+                                    </ListView.ItemsPanel>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="local:VideoCardViewModel">
+                                            <controls:ShortCard Video="{x:Bind Video}"
                                                 Clicked="OnVideoCardClicked"/>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>

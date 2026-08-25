@@ -85,6 +85,7 @@ public sealed partial class HomePage : Page
     private void OnRowLoaded(object sender, RoutedEventArgs e)
     {
         if (sender is not ListView listView || listView.Tag is not ShelfViewModel shelf) return;
+        if (listView.Visibility != Visibility.Visible) return;   // the row's other (hidden) ListView
         if (shelf.ScrollViewer is not null) return;   // already wired
         if (FindScrollViewer(listView) is not { } scrollViewer) return;
         shelf.ScrollViewer = scrollViewer;
@@ -100,7 +101,7 @@ public sealed partial class HomePage : Page
         try
         {
             var rowPage = await App.Session.RunAsync(t => App.Session.Feed.LoadMoreItemsAsync(continuation, t));
-            foreach (var item in rowPage.Items) shelf.Items.Add(new VideoCardViewModel(item));
+            foreach (var item in shelf.Admit(rowPage.Items)) shelf.Items.Add(new VideoCardViewModel(item));
             shelf.Continuation = rowPage.Continuation;
             App.Session.History.Remember(rowPage.Items);
             RefreshProgress(shelf.Items);
