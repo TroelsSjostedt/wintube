@@ -170,5 +170,5 @@ public sealed partial class HomePage : Page
     // MARK: card interaction
 
     private void OnVideoCardClicked(object sender, VideoItem video) =>
-        Frame.Navigate(typeof(PlayerPage), video);
+        Frame.Navigate(typeof(PlayerPage), new PlayerRequest(video));
 }

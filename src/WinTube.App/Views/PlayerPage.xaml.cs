@@ -2,10 +2,12 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Media.Streaming.Adaptive;
 using WinTube.Core.InnerTube;
+using WinTube.Core.Links;
 using WinTube.Core.Models;
 using WinTube.Core.Player;
 using WinTube.Core.SponsorBlock;
@@ -21,6 +23,8 @@ public sealed partial class PlayerPage : Page
     private readonly DispatcherQueue dispatcher = DispatcherQueue.GetForCurrentThread();
 
     private VideoItem? video;
+    private TimeSpan? startAt;
+    private TimeSpan flyoutPosition;
     private MediaPlayer? player;
     private DispatcherQueueTimer? progressTimer;
     private DispatcherQueueTimer? stallTimer;
@@ -41,7 +45,9 @@ public sealed partial class PlayerPage : Page
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
-        video = (VideoItem)e.Parameter;
+        var request = (PlayerRequest)e.Parameter;
+        video = request.Video;
+        startAt = request.StartAt;
         TitleText.Text = video.Title;
         leftPage = false;
         retried = false;
@@ -150,7 +156,8 @@ public sealed partial class PlayerPage : Page
     {
         if (leftPage || player != sender) return;
 
-        if (App.Session.Progress.ResumePosition(video!.Id) is { } resume)
+        var resumeSeconds = startAt?.TotalSeconds ?? App.Session.Progress.ResumePosition(video!.Id);
+        if (resumeSeconds is { } resume)
             sender.PlaybackSession.Position = TimeSpan.FromSeconds(resume);
 
         SelectOriginalAudioTrack(sender);
@@ -326,4 +333,28 @@ public sealed partial class PlayerPage : Page
     }
 
     private void OnBack(object sender, RoutedEventArgs e) => Frame.GoBack();
+
+    // MARK: copy link
+
+    private void OnCopyLink(SplitButton sender, SplitButtonClickEventArgs args) =>
+        CopyLink(YouTubeLink.For(video!.Id));
+
+    /// The label carries the live position captured when the flyout opens, so what the item
+    /// says is exactly what a click copies.
+    private void OnCopyFlyoutOpening(object sender, object e)
+    {
+        flyoutPosition = player?.PlaybackSession?.Position ?? TimeSpan.Zero;
+        CopyLinkAtItem.Text = $"Copy link at {YouTubeLink.Format(flyoutPosition)}";
+    }
+
+    private void OnCopyLinkAt(object sender, RoutedEventArgs e) =>
+        CopyLink(YouTubeLink.For(video!.Id, flyoutPosition));
+
+    private void CopyLink(string url)
+    {
+        var package = new DataPackage();
+        package.SetText(url);
+        Clipboard.SetContent(package);
+        ShowSkipToast("Link copied");
+    }
 }

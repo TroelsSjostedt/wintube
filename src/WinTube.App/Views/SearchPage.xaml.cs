@@ -2,6 +2,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System.Collections.ObjectModel;
+using WinTube.Core.Links;
 using WinTube.Core.Models;
 
 namespace WinTube.App.Views;
@@ -36,6 +37,20 @@ public sealed partial class SearchPage : Page
         {
             var query = args.QueryText?.Trim();
             if (string.IsNullOrWhiteSpace(query)) return;
+
+            if (YouTubeLink.TryParse(query) is { } link)
+            {
+                Frame.Navigate(typeof(PlayerPage), new PlayerRequest(
+                    new VideoItem
+                    {
+                        Id = link.VideoId,
+                        Title = "",
+                        ThumbnailUrl = VideoItem.FallbackThumbnail(link.VideoId),
+                    },
+                    link.StartAt));
+                return;
+            }
+
             await RunSearchAsync(query);
         }
         catch
@@ -110,5 +125,5 @@ public sealed partial class SearchPage : Page
     // MARK: card interaction
 
     private void OnVideoCardClicked(object sender, VideoItem video) =>
-        Frame.Navigate(typeof(PlayerPage), video);
+        Frame.Navigate(typeof(PlayerPage), new PlayerRequest(video));
 }
