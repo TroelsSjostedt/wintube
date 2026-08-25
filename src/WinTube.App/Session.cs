@@ -56,6 +56,12 @@ public sealed class Session
             appwriteSessions = new AppwriteSessionStore(DataDirectory);
             ProgressSync = new WatchProgressSync(
                 Progress, new AppwriteClient(http, appwrite), appwriteSessions, DataDirectory);
+            WatchProgressSync.LogTo(DataDirectory, $"sync on: endpoint={appwrite.Endpoint}, project={appwrite.ProjectId}");
+        }
+        else
+        {
+            WatchProgressSync.LogTo(DataDirectory,
+                "sync off: appwriteHost/appwriteProjectId not set in secrets.json");
         }
 
         Profile = tokenStore.Load();
@@ -138,16 +144,20 @@ public sealed class Session
         try
         {
             if (Profile is not { AccountKey: null }) return;
+            WatchProgressSync.LogTo(DataDirectory, "backfilling account key via accounts_list");
             var captured = Profile;
             var info = await RunAsync(t => Accounts.LoadAsync(t));
             if (!ReferenceEquals(Profile, captured)) return;
             Profile = Profile with { AccountKey = info.Key };
             tokenStore.Save(Profile);
+            WatchProgressSync.LogTo(DataDirectory, "account key backfilled; re-activating sync");
             ActivateSync();
         }
-        catch
+        catch (Exception e)
         {
-            // Swallowed: sync stays off until next launch.
+            // Swallowed: sync stays off until next launch. Logged, or a dead backfill is
+            // indistinguishable from a quiet one.
+            WatchProgressSync.LogTo(DataDirectory, $"account-key backfill failed: {e.Message}");
         }
     }
 }

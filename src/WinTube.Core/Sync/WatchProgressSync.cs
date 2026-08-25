@@ -44,6 +44,7 @@ public sealed class WatchProgressSync
         this.sessions = sessions;
         this.rootDirectory = rootDirectory;
         this.delay = delay ?? Task.Delay;
+        RotateLog(rootDirectory);
         store.LocalChanged += ScheduleFlush;
     }
 
@@ -61,6 +62,10 @@ public sealed class WatchProgressSync
 
         if (profileId is null || accountKey is null || accessToken is null)
         {
+            Log("deactivated (missing:"
+                + (profileId is null ? " profileId" : "")
+                + (accountKey is null ? " accountKey" : "")
+                + (accessToken is null ? " accessToken" : "") + ")");
             target = null;
             client.Session = null;
             return;
@@ -68,6 +73,8 @@ public sealed class WatchProgressSync
         var syncId = profileId[..Math.Min(16, profileId.Length)];
         target = new Target(syncId, accountKey, accessToken);
         client.Session = sessions.Load(syncId);
+        Log($"activated syncId={syncId}; stored session={(client.Session is null ? "none" : "found")}; "
+            + $"local entries={store.Entries.Count}, dirty={store.Dirty.Count}");
         Sync();
     }
 
@@ -141,6 +148,7 @@ public sealed class WatchProgressSync
             if (ct.IsCancellationRequested || target?.SyncId != profile.SyncId) return null;
             client.Session = session;
             sessions.Save(profile.SyncId, session);
+            Log($"signed in as {session.UserId}");
             return session.UserId;
         }
         catch (Exception e)
@@ -312,6 +320,42 @@ public sealed class WatchProgressSync
         }
     }
 
-    private static void Log(string message) =>
+    private void Log(string message) => LogTo(rootDirectory, message);
+
+    // MARK: logging — to a file, not only the debugger: the engine swallows every failure by
+    // design, and without this a dead sync is indistinguishable from a quiet one.
+
+    private static readonly object LogGate = new();
+
+    /// Appends one timestamped line to <root>\sync.log. Static so Session can log the cases
+    /// where no engine was ever constructed (sync off). Never throws.
+    public static void LogTo(string rootDirectory, string message)
+    {
         System.Diagnostics.Debug.WriteLine($"[WatchProgressSync] {message}");
+        try
+        {
+            lock (LogGate)
+            {
+                File.AppendAllText(Path.Combine(rootDirectory, "sync.log"),
+                    $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff} {message}{Environment.NewLine}");
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // A log that can't be written must not take the sync down with it.
+        }
+    }
+
+    /// Keeps the log from growing without bound across months of app launches.
+    private static void RotateLog(string rootDirectory)
+    {
+        try
+        {
+            var path = Path.Combine(rootDirectory, "sync.log");
+            if (new FileInfo(path) is { Exists: true, Length: > 256 * 1024 }) File.Delete(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
 }
