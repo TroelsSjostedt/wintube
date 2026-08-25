@@ -1,0 +1,131 @@
+<title>WinTube SponsorBlock</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5; --ink: #24211E; --muted: #6B645C; --accent: #A63D2F;
+    --line: #E4DFD8; --card: #FFFFFF; --code-bg: #F1EDE7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+      --line: #35302B; --card: #242019; --code-bg: #262119;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+    --line: #35302B; --card: #242019; --code-bg: #262119;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "Public Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 16px; line-height: 1.6; margin: 0; padding: 0 1.25rem 6rem;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2 { font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  p { margin: .75rem 0; }
+  a { color: var(--accent); }
+  code, pre { font-family: "IBM Plex Mono", Consolas, monospace; font-size: .85em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.25rem; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .eyebrow {
+    font-family: "Schibsted Grotesk", sans-serif; font-size: .72rem; font-weight: 600;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 3.5rem 0 .25rem;
+  }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; color: var(--muted); font-size: .85rem;
+    margin: 1rem 0 0; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line);
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  .table-wrap { overflow-x: auto; }
+  th {
+    text-align: left; font-family: "Schibsted Grotesk", sans-serif; font-size: .78rem; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+    border-bottom: 2px solid var(--line); padding: .4rem .75rem .4rem 0;
+  }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .75rem .55rem 0; vertical-align: top; }
+  td:first-child, th:first-child { padding-left: 0; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--card);
+    border-radius: 0 8px 8px 0; padding: .75rem 1.25rem; margin: 1.25rem 0;
+  }
+  ul { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Stage 3 · Approved 2026-08-25</p>
+  <h1>WinTube SponsorBlock</h1>
+  <p>Automatic skipping of in-video interruptions — read-out sponsor spots, "smash that
+  subscribe", non-music sections — using <a href="https://sponsor.ajay.app">SponsorBlock</a>'s
+  public, unauthenticated API. A port of the tvOS <code>SponsorBlockService</code>/<code>SponsorBlockSkipper</code>
+  pair onto <code>MediaPlayerElement</code>.</p>
+  <div class="meta">
+    <span><b>Not ad blocking</b> — pre/mid-rolls never reach this app; this removes the read <em>inside</em> the video</span>
+    <span><b>Base</b> WinTube v1 + sync (stage 2)</span>
+  </div>
+</header>
+
+<h2>1 · Privacy model (unchanged from tvOS)</h2>
+<p>The videoId is never sent. Only the <b>first four hex characters of its SHA-256</b> go to the
+server, which answers with every video sharing that prefix (~1/65,536 of YouTube); the match
+happens on device, against <code>videoID</code> or the full <code>hash</code> the server echoes.
+This is SponsorBlock's recommended mode and costs one slightly larger response.</p>
+
+<h2>2 · Core — <code>WinTube.Core.SponsorBlock</code></h2>
+<div class="table-wrap"><table>
+  <tr><th>Type</th><th>Contract</th></tr>
+  <tr><td><code>SponsorCategory</code></td><td>sponsor, selfpromo, interaction, intro, outro, preview, filler, music_offtopic — raw API identifiers on the wire, display names for the toast ("Sponsor", "Self-promotion", "Subscribe reminder", "Intro", "Outro", "Recap", "Filler", "Non-music section"). <code>DefaultSkipped</code> = sponsor, selfpromo, interaction, music_offtopic; the other four are editorial content and stay opt-in-less (no settings UI, as on tvOS).</td></tr>
+  <tr><td><code>SponsorSegment</code></td><td><code>(Id, Category, Start, End)</code> seconds; <code>Contains(t)</code> = <code>t &gt;= Start &amp;&amp; t &lt; End</code>.</td></tr>
+  <tr><td><code>SponsorBlockService</code></td><td><code>FetchSegmentsAsync(videoId, categories?, ct)</code> → GET <code>https://sponsor.ajay.app/api/skipSegments/{prefix4}?categories=[…]&amp;actionTypes=["skip"]</code>, both params JSON arrays; categories sorted for a stable URL; User-Agent <code>WinTube/0.1</code>; 8 s timeout. Anything but HTTP 200 — including 404, the ordinary "no segments in this prefix" answer — and every exception → empty list. An optional enhancement must never keep a video from playing.</td></tr>
+</table></div>
+<p>Filtering and merging, ported exactly: drop submissions with <code>votes &lt; 0</code>
+(community-disowned timestamps cut real content) and segments under 1 s (the seek costs more
+than the segment); sort by start and fold overlapping-or-touching segments (gap ≤ 0.5 s) into
+one, keeping the earlier segment's id and category — that's the one whose start the user
+reaches, so it's the name the toast shows.</p>
+
+<h2>3 · Player integration</h2>
+<ul>
+  <li><b>Fetch after playback starts:</b> the lookup fires on the first <code>Playing</code>
+  state, so a slow third-party server can never delay the first frame.</li>
+  <li><b>Poll, don't event:</b> a 250 ms <code>DispatcherQueueTimer</code> compares the position
+  against the segment list. Polling catches every way into a segment — playing into it, a
+  resume position landing mid-sponsor, the user scrubbing into one — where a boundary event
+  fires only on the segment's first frame.</li>
+  <li><b>Skip once per playback:</b> a segment's id enters a skipped-set on first contact;
+  rewinding into it afterwards (a discount code, wrong timestamps) plays normally instead of
+  bouncing the user forward again.</li>
+  <li><b>The seek:</b> to <code>min(segment.End, NaturalDuration)</code> — a segment running to
+  the end of the video pauses at the last frame rather than poking at end-of-stream handling.</li>
+  <li><b>Toast:</b> <em>"Skipped Sponsor · 42s"</em> bottom-center for 3 s, so a chunk of video
+  vanishing doesn't read as a stream glitch. A newer skip replaces the toast and owns its
+  timer.</li>
+  <li><b>Cleanup:</b> timer stopped and state cleared in <code>OnNavigatedFrom</code>, alongside
+  the existing teardown; a retry/new resolve re-attaches with the same segment list.</li>
+</ul>
+
+<h2>4 · Testing</h2>
+<ul>
+  <li><b>Unit (stubbed HTTP):</b> URL shape (prefix-4 of a known sha256, JSON-array params,
+  sorted categories); match by videoID and by full hash; votes&lt;0 and &lt;1 s dropped;
+  overlap merge (identity kept, containment, 0.5 s touching); 404/timeout/garbage → empty.</li>
+  <li><b>Unit (selection):</b> the "next segment to skip at time t, given the skipped-set"
+  logic lives in Core and is tested directly.</li>
+  <li><b>Manual (the user):</b> a video with a known sponsor read skips with a toast; rewinding
+  into the skipped stretch plays it; playback of a segment-less video is unaffected.</li>
+</ul>
+
+<h2>5 · Out of scope</h2>
+<p>Mute-type segments, poi/chapter entries, a settings UI for categories, transport-bar segment
+markers (tvOS has them; add later if missed), and submitting/voting on segments.</p>
+
+<p class="meta" style="border-bottom:none;border-top:1px solid var(--line);padding-top:1.5rem;margin-top:3rem;">
+<span>WinTube SponsorBlock design · 2026-08-25 · approved in session</span></p>
+</main>
