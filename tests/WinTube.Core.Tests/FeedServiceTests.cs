@@ -55,20 +55,70 @@ public class FeedServiceTests
     }
 
     [Fact]
-    public async Task Home_ShortsShelvesAndStrayShortsAreDropped()
+    public async Task Home_KeepsShortsRow_AndMovesStraysIntoIt()
     {
-        var json = "{\"contents\":{\"sectionListRenderer\":{\"contents\":[" +
+        var (feed, _) = Make("{\"contents\":{\"sectionListRenderer\":{\"contents\":[" +
             "{\"reelShelfRenderer\":{\"items\":[" + ShortTile("s1") + "]}}," +
             "{\"shelfRenderer\":{" +
             "\"headerRenderer\":{\"shelfHeaderRenderer\":{\"title\":{\"simpleText\":\"Mixed\"}}}," +
             "\"content\":{\"horizontalListRenderer\":{" +
-            "\"items\":[" + Tile("v1") + "," + ShortTile("s2") + "]}}}}]}}}";
-
-        var (feed, _) = Make(json);
+            "\"items\":[" + Tile("v1") + "," + ShortTile("s2") + "]}}}}]}}}");
         var page = await feed.LoadHomeAsync("T");
-        var section = Assert.Single(page.Sections);        // reel shelf gone entirely
-        Assert.Equal("Mixed", section.Title);
-        Assert.Equal(["v1"], section.Items.Select(i => i.Id));   // stray Short dropped
+        Assert.Equal(2, page.Sections.Count);
+
+        var shorts = page.Sections[0];
+        Assert.True(shorts.IsShorts);
+        Assert.Equal("Shorts", shorts.Title);                       // untitled reel shelf named
+        Assert.Equal(["s1", "s2"], shorts.Items.Select(i => i.Id)); // stray s2 moved in
+        Assert.All(shorts.Items, i => Assert.True(i.IsShort));
+
+        var mixed = page.Sections[1];
+        Assert.False(mixed.IsShorts);
+        Assert.Equal(["v1"], mixed.Items.Select(i => i.Id));        // Short lifted out, not lost
+    }
+
+    [Fact]
+    public async Task Home_StraysWithNoShortsShelf_BecomeASynthesizedRowAtTheEnd()
+    {
+        var (feed, _) = Make("{\"contents\":{\"sectionListRenderer\":{\"contents\":[" +
+            "{\"shelfRenderer\":{" +
+            "\"headerRenderer\":{\"shelfHeaderRenderer\":{\"title\":{\"simpleText\":\"Mixed\"}}}," +
+            "\"content\":{\"horizontalListRenderer\":{" +
+            "\"items\":[" + Tile("v1") + "," + ShortTile("s1") + "]}}}}]}}}");
+        var page = await feed.LoadHomeAsync("T");
+        Assert.Equal(2, page.Sections.Count);
+        Assert.False(page.Sections[0].IsShorts);
+        var shorts = page.Sections[1];
+        Assert.True(shorts.IsShorts);
+        Assert.Equal("Shorts", shorts.Title);
+        Assert.Equal(["s1"], shorts.Items.Select(i => i.Id));
+    }
+
+    [Fact]
+    public async Task HistoryFeed_FoldingSkipsShortsRows_AndRetitlesFirstNonShortsRow()
+    {
+        var (feed, _) = Make("{\"contents\":{\"sectionListRenderer\":{\"contents\":[" +
+            "{\"reelShelfRenderer\":{\"items\":[" + ShortTile("s1") + "]}}," +
+            "{\"shelfRenderer\":{" +
+            "\"headerRenderer\":{\"shelfHeaderRenderer\":{\"title\":{\"simpleText\":\"Today\"}}}," +
+            "\"content\":{\"horizontalListRenderer\":{\"items\":[" + Tile("v1") + "]}}}}," +
+            "{\"shelfRenderer\":{\"content\":{\"horizontalListRenderer\":{" +
+            "\"items\":[" + Tile("v2") + "]}}}}]}}}");
+        var page = await feed.LoadHistoryFeedAsync("T");
+        Assert.Equal(2, page.Sections.Count);
+        Assert.True(page.Sections[0].IsShorts);
+        Assert.Equal("Shorts", page.Sections[0].Title);             // NOT retitled
+        Assert.Equal("Continue watching", page.Sections[1].Title);  // first non-Shorts row
+        Assert.Equal(["v1", "v2"], page.Sections[1].Items.Select(i => i.Id));
+    }
+
+    [Fact]
+    public async Task RowContinuation_ReturnsRawItemsIncludingShorts()
+    {
+        var (feed, _) = Make("{\"continuationContents\":{\"horizontalListContinuation\":{" +
+            "\"items\":[" + Tile("v3") + "," + ShortTile("s3") + "]}}}");
+        var row = await feed.LoadMoreItemsAsync("TOKEN", "T");
+        Assert.Equal(["v3", "s3"], row.Items.Select(i => i.Id));    // no filtering here
     }
 
     [Fact]

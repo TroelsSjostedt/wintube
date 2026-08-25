@@ -17,6 +17,7 @@ public sealed class FeedService(InnerTubeClient innerTube)
         ["horizontalListRenderer", "horizontalListContinuation", "gridRenderer", "gridContinuation"];
     private static readonly string[] TokenPaths =
         ["nextContinuationData/continuation", "reloadContinuationData/continuation"];
+    private const string ShortsShelfTitle = "Shorts";
 
     public async Task<FeedPage> LoadHomeAsync(string accessToken, CancellationToken ct = default)
     {
@@ -35,8 +36,9 @@ public sealed class FeedService(InnerTubeClient innerTube)
             new Dictionary<string, object?> { ["browseId"] = "FEhistory" }, accessToken, ct);
         var page = ParsePage(doc.RootElement);
         var sections = FoldUntitledRows(page.Sections);
-        if (sections.Count > 0)
-            sections[0] = sections[0] with { Title = "Continue watching" };
+        var first = sections.FindIndex(section => !section.IsShorts);
+        if (first >= 0)
+            sections[first] = sections[first] with { Title = "Continue watching" };
         return page with { Sections = sections };
     }
 
@@ -54,8 +56,7 @@ public sealed class FeedService(InnerTubeClient innerTube)
     {
         using var doc = await BrowseAsync(
             new Dictionary<string, object?> { ["continuation"] = continuation }, accessToken, ct);
-        var items = VideoItemParser.Items(doc.RootElement, DateTimeOffset.UtcNow)
-            .Where(item => !item.IsShort).ToList();
+        var items = VideoItemParser.Items(doc.RootElement, DateTimeOffset.UtcNow);
         return new FeedRowPage(items, Continuation(doc.RootElement, RowContainers));
     }
 
@@ -65,6 +66,34 @@ public sealed class FeedService(InnerTubeClient innerTube)
 
     // MARK: parsing
 
+    /// Puts the Shorts lifted out of ordinary shelves where they belong: appended to the
+    /// response's own Shorts row, or a row of their own at the end. Without this a Short
+    /// filtered out of Recommended would simply disappear.
+    private static List<FeedSection> Merging(List<VideoItem> shorts, List<FeedSection> sections)
+    {
+        if (shorts.Count == 0) return sections;
+        var index = sections.FindIndex(section => section.IsShorts);
+        if (index >= 0)
+        {
+            var existing = sections[index].Items.Select(item => item.Id).ToHashSet();
+            var fresh = shorts.Where(item => !existing.Contains(item.Id))
+                .Select(item => item with { IsShort = true }).ToList();
+            if (fresh.Count == 0) return sections;
+            sections[index] = sections[index] with
+            {
+                Items = [.. sections[index].Items, .. fresh],
+            };
+        }
+        else
+        {
+            sections.Add(new FeedSection(
+                Guid.NewGuid().ToString("N"), ShortsShelfTitle,
+                shorts.Select(item => item with { IsShort = true }).ToList(),
+                null, IsShorts: true));
+        }
+        return sections;
+    }
+
     private static FeedPage ParsePage(JsonElement json)
     {
         var now = DateTimeOffset.UtcNow;
@@ -72,6 +101,9 @@ public sealed class FeedService(InnerTubeClient innerTube)
         // Shelves can nest; tracking emitted ids drops a shelf that only repeats an earlier
         // one without suppressing a video that legitimately appears in two rows.
         var emitted = new HashSet<string>();
+        // Shorts pulled out of ordinary shelves, in the order they were met. Merged in below,
+        // once it's known whether the response has a Shorts row of its own.
+        var strayShorts = new List<VideoItem>();
 
         foreach (var (renderer, isReel) in FindShelves(json))
         {
@@ -83,27 +115,42 @@ public sealed class FeedService(InnerTubeClient innerTube)
             // The shelf's own kind first: a reel shelf is a Shorts row whatever its cells look
             // like, and so is one flying the Shorts glyph or holding nothing but Shorts.
             var isShorts = isReel || HasShortsIcon(renderer) || items.All(item => item.IsShort);
-            if (isShorts) continue;   // v1 scope: Shorts rows are dropped, not shown
+            var title = ShelfTitle(renderer) ?? "";
+            var continuation = Continuation(renderer, RowContainers);
 
-            var videos = items.Where(item => !item.IsShort).ToList();   // strays dropped too
+            if (isShorts)
+            {
+                sections.Add(new FeedSection(
+                    Guid.NewGuid().ToString("N"),
+                    title.Length == 0 ? ShortsShelfTitle : title,
+                    items.Select(item => item with { IsShort = true }).ToList(),
+                    continuation, IsShorts: true));
+                continue;
+            }
+
+            strayShorts.AddRange(items.Where(item => item.IsShort));
+            var videos = items.Where(item => !item.IsShort).ToList();
+            // Everything in the shelf was a Short, and they're kept for the Shorts row.
             if (videos.Count == 0) continue;
 
             sections.Add(new FeedSection(
-                Guid.NewGuid().ToString("N"), ShelfTitle(renderer) ?? "", videos,
-                Continuation(renderer, RowContainers), IsShorts: false));
+                Guid.NewGuid().ToString("N"), title, videos, continuation, IsShorts: false));
         }
 
         // Defensive fallback: no recognizable shelves — present everything playable as one
-        // untitled row rather than showing nothing.
-        if (sections.Count == 0)
+        // untitled row, Shorts still separated into their own.
+        if (sections.Count == 0 && strayShorts.Count == 0)
         {
-            var videos = VideoItemParser.Items(json, now).Where(item => !item.IsShort).ToList();
+            var items = VideoItemParser.Items(json, now);
+            strayShorts.AddRange(items.Where(item => item.IsShort));
+            var videos = items.Where(item => !item.IsShort).ToList();
             if (videos.Count > 0)
                 sections.Add(new FeedSection(
                     Guid.NewGuid().ToString("N"), "", videos, null, IsShorts: false));
         }
 
-        return new FeedPage(sections, Continuation(json, SectionListContainers));
+        return new FeedPage(
+            Merging(strayShorts, sections), Continuation(json, SectionListContainers));
     }
 
     /// Every shelf-shaped renderer, in document order — which is the order YouTube wants the
@@ -187,6 +234,7 @@ public sealed class FeedService(InnerTubeClient innerTube)
 
         foreach (var section in sections)
         {
+            if (section.IsShorts) { result.Add(section); continue; }
             if (section.Title.Length > 0)
             {
                 result.Add(section);
