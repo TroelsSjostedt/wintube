@@ -81,5 +81,21 @@ public partial class App : Application
         {
             yield return protocolArgs.Uri.ToString();
         }
+        else if (args.Kind == ExtendedActivationKind.Launch
+            && args.Data is Windows.ApplicationModel.Activation.ILaunchActivatedEventArgs launchArgs
+            && launchArgs.Arguments is { } arguments)
+        {
+            // A redirected command-line launch: the running instance's own
+            // Environment.GetCommandLineArgs() doesn't see the second process's args, so this
+            // is the only way to recover them. The whole string covers an unquoted single
+            // token; each whitespace-separated piece covers a quoted URL passed alongside
+            // other args. TryParse rejects anything that isn't a link, so over-yielding is
+            // harmless.
+            yield return arguments;
+            foreach (var token in arguments.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+            {
+                yield return token;
+            }
+        }
     }
 }
