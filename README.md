@@ -49,7 +49,7 @@ Sync is best-effort: network and auth failures are logged at debug level and nev
 
 ## Skipping sponsors (SponsorBlock)
 
-**Optional:** The player can automatically skip community-flagged interruptions — sponsor reads, subscribe reminders, and similar non-content sections — using [SponsorBlock](https://sponsor.ajay.app), a public crowd-sourced database. Off by default; no configuration needed.
+The player automatically skips community-flagged interruptions — sponsor reads, subscribe reminders, and similar non-content sections — using [SponsorBlock](https://sponsor.ajay.app), a public crowd-sourced database. Built in and always on; no configuration.
 
 This **is NOT YouTube ad blocking**: pre-rolls and mid-rolls never reach the app. Only in-video segments that viewers submit are acted on.
 
