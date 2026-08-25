@@ -47,6 +47,18 @@ To enable: add `appwriteHost` (host only, no scheme) and `appwriteProjectId` to 
 
 Sync is best-effort: network and auth failures are logged at debug level and never crash the app. A stale or expired session re-authenticates transparently on the next pull. Sign-out keeps the backend copy and stored watch progress by design.
 
+## Skipping sponsors (SponsorBlock)
+
+**Optional:** The player can automatically skip community-flagged interruptions — sponsor reads, subscribe reminders, and similar non-content sections — using [SponsorBlock](https://sponsor.ajay.app), a public crowd-sourced database. Off by default; no configuration needed.
+
+This **is NOT YouTube ad blocking**: pre-rolls and mid-rolls never reach the app. Only in-video segments that viewers submit are acted on.
+
+**Privacy:** Your videoId is never sent to SponsorBlock. The service takes the first 4 hex chars of its SHA-256 hash (the same prefix could match ~65,000 videos), returns every video whose hash starts with them, and the match happens on your device. SponsorBlock learns someone is watching one of those 65,000 videos, not which one.
+
+**What gets skipped:** sponsor reads, self-promotion, subscribe reminders, and non-music sections in music videos — the four unambiguously not-the-video categories. Intros, outros, recaps, and filler are editorial parts of the video itself; plenty of people want them, so they're parsed but never skipped. No settings UI.
+
+Each segment is skipped at most once per playback. If you rewind into a skipped stretch, it plays normally — the skip only fires on forward playback. Videos with no submissions play exactly as before. SponsorBlock is best-effort; if the service is down or slow, the video plays with no interruption — the skip fetch fires after playback starts, never blocks the first frame.
+
 ## First run
 
 The one real technical risk the design spec called out (§3, "stage-0 playback gate") — whether
@@ -82,7 +94,7 @@ ever regresses.
 | History | In | Watch progress + `FEhistory`, folded by the tvOS placement rules. |
 | Multiple profiles | Later | Profile id (`sha256(obfuscatedGaiaId)`) is stored from day one so this needs no migration. |
 | Appwrite watch-progress sync | **In (stage 2)** | Shares rows with the Apple TV; see the sync section above. |
-| SponsorBlock | Later | |
+| SponsorBlock | **In (stage 3)** | Automatic skipping of sponsor reads and similar non-content. See the SponsorBlock section above. |
 | Preview on hover/focus | Later | |
 | Shorts | Later | Filtered out entirely in v1. |
 | Channels / subscriptions | Later | |

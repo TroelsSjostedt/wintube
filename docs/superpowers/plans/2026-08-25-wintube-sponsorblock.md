@@ -48,7 +48,7 @@ tests/WinTube.Core.Tests/SponsorBlockServiceTests.cs
   - `static class SponsorCategories` with `IReadOnlySet<SponsorCategory> DefaultSkipped`, extension `string ApiName(this SponsorCategory)`, extension `string DisplayName(this SponsorCategory)`, and `SponsorCategory? FromApiName(string name)` (null for unknown — the API grows categories, and an unknown one must be ignored, not crash parsing).
   - `sealed record SponsorSegment(string Id, SponsorCategory Category, double Start, double End)` with `double Duration => End - Start`, `bool Contains(double time)` (`time >= Start && time < End`), `static IReadOnlyList<SponsorSegment> Merge(IEnumerable<SponsorSegment> segments)`, `static SponsorSegment? NextToSkip(IReadOnlyList<SponsorSegment> segments, double time, IReadOnlySet<string> skippedIds)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/WinTube.Core.Tests/SponsorSegmentTests.cs`:
 
@@ -133,11 +133,11 @@ public class SponsorSegmentTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: compile FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/WinTube.Core/SponsorBlock/SponsorCategory.cs`:
 
@@ -257,11 +257,11 @@ public sealed record SponsorSegment(string Id, SponsorCategory Category, double 
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (+7).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: SponsorBlock categories, segments, merge and selection"
@@ -280,7 +280,7 @@ git add -A && git commit -m "feat: SponsorBlock categories, segments, merge and 
 - Produces: `sealed class SponsorBlockService(HttpClient http)` with
   `Task<IReadOnlyList<SponsorSegment>> FetchSegmentsAsync(string videoId, IReadOnlySet<SponsorCategory>? categories = null, CancellationToken ct = default)` — categories default `SponsorCategories.DefaultSkipped`; empty set → `[]` without a request; the whole body is wrapped so every failure returns `[]`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/WinTube.Core.Tests/SponsorBlockServiceTests.cs`:
 
@@ -375,11 +375,11 @@ public class SponsorBlockServiceTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: compile FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/WinTube.Core/SponsorBlock/SponsorBlockService.cs`:
 
@@ -476,11 +476,11 @@ public sealed class SponsorBlockService(HttpClient http)
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (+7, incl. the 3-case Theory).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: SponsorBlock segment fetch with hash-prefix privacy"
@@ -584,13 +584,13 @@ Changes:
 
    - **Teardown** in `OnNavigatedFrom`, next to the existing timer/player cleanup: stop both timers and clear `sponsorSegments`/`sponsorSkipped`. The ladder retry (same video) deliberately KEEPS both — segments belong to the video, and a segment already skipped stays skipped across a retry.
 
-- [ ] **Step 1: Implement** the three changes above.
+- [x] **Step 1: Implement** the three changes above.
 
-- [ ] **Step 2: Build and test**
+- [x] **Step 2: Build and test**
 
 Run: `dotnet build src/WinTube.App -p:Platform=x64` (clean) and `dotnet test tests/WinTube.Core.Tests` (all green).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A && git commit -m "feat: skip SponsorBlock segments in the player with a toast"
@@ -603,16 +603,17 @@ git add -A && git commit -m "feat: skip SponsorBlock segments in the player with
 **Files:**
 - Modify: `README.md`, `docs/superpowers/plans/2026-08-25-wintube-sponsorblock.md`
 
-- [ ] **Step 1: README** — add a "Skipping sponsors (SponsorBlock)" section in the metube voice: what it is (crowd-sourced, public API), that it is NOT YouTube-ad blocking (those never reach the app), the privacy model (4-char hash prefix, match on device), default categories, skip-once-per-playback, silent on outage. Move the scope table's SponsorBlock row from "Later" to "In (stage 3)".
+- [x] **Step 1: README** — add a "Skipping sponsors (SponsorBlock)" section in the metube voice: what it is (crowd-sourced, public API), that it is NOT YouTube-ad blocking (those never reach the app), the privacy model (4-char hash prefix, match on device), default categories, skip-once-per-playback, silent on outage. Move the scope table's SponsorBlock row from "Later" to "In (stage 3)".
 
-- [ ] **Step 2: Tick the executed checkboxes** in this plan (edit with UTF-8-safe tooling — the file carries em-dashes; PowerShell 5.1 Get-Content/Set-Content mangles them).
+- [x] **Step 2: Tick the executed checkboxes** in this plan (edit with UTF-8-safe tooling — the file carries em-dashes; PowerShell 5.1 Get-Content/Set-Content mangles them).
 
 - [ ] **Step 3: MANUAL VERIFICATION (the user)** — leave unticked with an italic deferral note until done:
+  *Deferred: the user verifies against a real video.*
   1. Play a video with a known sponsor read (most large tech/podcast channels) → it skips with a "Skipped Sponsor · Ns" toast.
   2. Rewind into the skipped stretch → it plays normally.
   3. A video with no segments plays exactly as before.
 
-- [ ] **Step 4: Final gates and commit**
+- [x] **Step 4: Final gates and commit**
 
 Run: `dotnet test tests/WinTube.Core.Tests` and `dotnet build src/WinTube.App -p:Platform=x64`.
 
