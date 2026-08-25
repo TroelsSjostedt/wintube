@@ -160,6 +160,10 @@ public sealed partial class PlayerPage : Page
         if (resumeSeconds is { } resume)
             sender.PlaybackSession.Position = TimeSpan.FromSeconds(resume);
 
+        // Applied once — a ladder retry re-entering OnMediaOpened after this must resume from
+        // recorded progress, not re-seek back to the original link timestamp.
+        startAt = null;
+
         SelectOriginalAudioTrack(sender);
         HideOverlays();
     });

@@ -75,17 +75,28 @@ public static partial class YouTubeLink
     }
 
     /// t=754, t=754s, t=1h2m3s, start=30 — anything else contributes no start time (a broken
-    /// timestamp must not reject the video itself).
+    /// timestamp must not reject the video itself). Components are parsed as long and the
+    /// running total is checked against int.MaxValue seconds throughout, so a huge value like
+    /// t=2147483648 yields null rather than overflowing int.Parse or wrapping into a bogus seek.
     private static TimeSpan? ParseStart(string? value)
     {
         if (string.IsNullOrEmpty(value)) return null;
         var match = StartPattern().Match(value);
         if (!match.Success) return null;
-        var total = 0;
-        if (match.Groups[1].Success) total += int.Parse(match.Groups[1].Value) * 3600;
-        if (match.Groups[2].Success) total += int.Parse(match.Groups[2].Value) * 60;
-        if (match.Groups[3].Success) total += int.Parse(match.Groups[3].Value);
+
+        long total = 0;
+        if (!TryAddComponent(match.Groups[1], 3600, ref total)) return null;
+        if (!TryAddComponent(match.Groups[2], 60, ref total)) return null;
+        if (!TryAddComponent(match.Groups[3], 1, ref total)) return null;
         return TimeSpan.FromSeconds(total);
+    }
+
+    private static bool TryAddComponent(Group group, long multiplier, ref long total)
+    {
+        if (!group.Success) return true;
+        if (!long.TryParse(group.Value, out var value)) return false;
+        total += value * multiplier;
+        return total <= int.MaxValue;
     }
 
     [GeneratedRegex("^[A-Za-z0-9_-]{11}$")]

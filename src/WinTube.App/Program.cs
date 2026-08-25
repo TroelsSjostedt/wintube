@@ -16,8 +16,19 @@ public static class Program
         var main = AppInstance.FindOrRegisterForKey("wintube-main");
         if (!main.IsCurrent)
         {
-            main.RedirectActivationToAsync(
-                AppInstance.GetCurrent().GetActivatedEventArgs()).AsTask().Wait();
+            // RedirectActivationToAsync(...).AsTask().Wait() run directly on this STA thread is
+            // the pattern Microsoft's AppLifecycle docs warn can deadlock: the COM completion may
+            // need this thread pumping messages, which a blocking Wait() never does. Running the
+            // redirect on a background thread keeps the STA thread out of its own way; the bounded
+            // wait below is just a backstop so a hung redirect can't strand this process forever.
+            var activatedArgs = AppInstance.GetCurrent().GetActivatedEventArgs();
+            var done = new ManualResetEventSlim(false);
+            _ = Task.Run(async () =>
+            {
+                try { await main.RedirectActivationToAsync(activatedArgs); }
+                finally { done.Set(); }
+            });
+            done.Wait(TimeSpan.FromSeconds(10));
             return 0;
         }
 

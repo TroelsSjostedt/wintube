@@ -44,6 +44,9 @@ public sealed partial class MainWindow : Window
     public void OpenVideo(string videoId, TimeSpan? startAt)
     {
         if (!App.Session.IsSignedIn) return;
+        if (AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter
+            { State: Microsoft.UI.Windowing.OverlappedPresenterState.Minimized } presenter)
+            presenter.Restore();
         this.Activate();
         RootFrame.Navigate(typeof(Views.PlayerPage), new PlayerRequest(
             new Core.Models.VideoItem
