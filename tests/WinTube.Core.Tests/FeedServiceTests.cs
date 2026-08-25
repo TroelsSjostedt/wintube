@@ -122,6 +122,25 @@ public class FeedServiceTests
     }
 
     [Fact]
+    public async Task Home_StrayShortsDedupedAcrossShelves()
+    {
+        var (feed, _) = Make("{\"contents\":{\"sectionListRenderer\":{\"contents\":[" +
+            "{\"shelfRenderer\":{" +
+            "\"headerRenderer\":{\"shelfHeaderRenderer\":{\"title\":{\"simpleText\":\"First\"}}}," +
+            "\"content\":{\"horizontalListRenderer\":{" +
+            "\"items\":[" + Tile("v1") + "," + ShortTile("s1") + "]}}}}," +
+            "{\"shelfRenderer\":{" +
+            "\"headerRenderer\":{\"shelfHeaderRenderer\":{\"title\":{\"simpleText\":\"Second\"}}}," +
+            "\"content\":{\"horizontalListRenderer\":{" +
+            "\"items\":[" + Tile("v2") + "," + ShortTile("s1") + "]}}}}]}}}");
+        var page = await feed.LoadHomeAsync("T");
+        Assert.Equal(3, page.Sections.Count);
+        var shorts = page.Sections[2];
+        Assert.True(shorts.IsShorts);
+        Assert.Equal(["s1"], shorts.Items.Select(i => i.Id));  // s1 appears exactly once, not twice
+    }
+
+    [Fact]
     public async Task Home_NestedDuplicateShelfIsSkipped()
     {
         var json = "{\"contents\":{\"sectionListRenderer\":{\"contents\":[" +

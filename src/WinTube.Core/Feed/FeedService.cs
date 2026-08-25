@@ -72,6 +72,7 @@ public sealed class FeedService(InnerTubeClient innerTube)
     private static List<FeedSection> Merging(List<VideoItem> shorts, List<FeedSection> sections)
     {
         if (shorts.Count == 0) return sections;
+        shorts = shorts.DistinctBy(item => item.Id).ToList();
         var index = sections.FindIndex(section => section.IsShorts);
         if (index >= 0)
         {

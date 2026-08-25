@@ -1,0 +1,99 @@
+<title>WinTube Shorts</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5; --ink: #24211E; --muted: #6B645C; --accent: #A63D2F;
+    --line: #E4DFD8; --card: #FFFFFF; --code-bg: #F1EDE7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+      --line: #35302B; --card: #242019; --code-bg: #262119;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+    --line: #35302B; --card: #242019; --code-bg: #262119;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: "Public Sans", "Segoe UI", system-ui, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; padding: 0 1.25rem 6rem; }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2 { font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  p { margin: .75rem 0; }
+  a { color: var(--accent); }
+  code, pre { font-family: "IBM Plex Mono", Consolas, monospace; font-size: .85em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  .eyebrow { font-family: "Schibsted Grotesk", sans-serif; font-size: .72rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 3.5rem 0 .25rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; color: var(--muted); font-size: .85rem; margin: 1rem 0 0; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: "Schibsted Grotesk", sans-serif; font-size: .78rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: .4rem .75rem .4rem 0; }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .75rem .55rem 0; vertical-align: top; }
+  td:first-child, th:first-child { padding-left: 0; }
+  ul { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Stage 5 · Approved 2026-08-25</p>
+  <h1>WinTube Shorts</h1>
+  <p>Shorts stop being filtered out: they get a row of their own with portrait tiles, and appear
+  nowhere else — the tvOS behavior, replacing v1's drop-everything scope cut.</p>
+  <div class="meta">
+    <span><b>Playback</b> The ordinary player — no vertical reel, as tvOS deliberately chose</span>
+    <span><b>Base</b> WinTube stages 1–4</span>
+  </div>
+</header>
+
+<h2>1 · Feed rules (ported from FeedService.swift / Models.swift)</h2>
+<ul>
+  <li><b>A Shorts row is kept, not dropped.</b> The existing classification stands (reel shelf,
+  SHORTS header glyph, or all-Short cells); an untitled Shorts row is titled <code>"Shorts"</code>.
+  Its items are all stamped <code>IsShort = true</code> — the row vouches for cells that didn't
+  label themselves.</li>
+  <li><b>Stray Shorts are moved, not lost.</b> Shorts lifted out of ordinary shelves are
+  collected in document order and appended (deduped by id) to the response's Shorts row — or
+  become one synthesized <code>"Shorts"</code> row at the end when the response has none. The
+  no-shelves fallback gets the same treatment.</li>
+  <li><b>Row paging decides by row</b> (<code>FeedSection.Admitting(items)</code>): a
+  continuation reply is a bare cell list with nothing naming its shelf, so the row applies its
+  own rule — a Shorts row stamps everything it pages in as Shorts; every other row drops the
+  Shorts YouTube mixes in. <code>FeedService.LoadMoreItemsAsync</code> therefore stops
+  filtering and returns raw items.</li>
+  <li><b>History folding ignores Shorts rows:</b> a Shorts row is never a fold target and never
+  folded away, and the history feed's retitle lands on the first non-Shorts row.</li>
+  <li><b>Search keeps its Shorts filter</b> — Shorts appear only in the Home row.</li>
+</ul>
+
+<h2>2 · The tile (from the tvOS README's Shorts section)</h2>
+<div class="table-wrap"><table>
+  <tr><th>Aspect</th><th>Decision</th></tr>
+  <tr><td>Shape</td><td>Portrait 9:16, 150 × 267 px, 8 px corners — the format is the point, so nothing competes with the artwork.</td></tr>
+  <tr><td>Chrome</td><td>No title, no stats, no duration badge (a Short has no running time to show). The only overlay is the channel's avatar, 24 px circle bottom-right, when the cell carried one.</td></tr>
+  <tr><td>Hover</td><td>A light 2 px edge around the tile — the video-card's caption treatment has no panel to light up here.</td></tr>
+  <tr><td>Row header</td><td>"Shorts" with the row's own visual mark, so the format change reads as intentional.</td></tr>
+  <tr><td>Click</td><td><code>PlayerRequest</code> into the ordinary player. SponsorBlock, progress recording and link copying work unchanged.</td></tr>
+</table></div>
+
+<h2>3 · Testing</h2>
+<ul>
+  <li><b>Unit:</b> the two v1 tests pinning drop-behavior are rewritten to pin keep-behavior
+  (reel shelf → Shorts row; strays merged/synthesized, deduped, order kept);
+  <code>Admitting</code> both directions; history folding skipping a Shorts row; search still
+  filtering.</li>
+  <li><b>Manual (the user):</b> Home shows a Shorts row with portrait tiles; a tile plays in
+  the normal player; no portrait tiles inside ordinary rows.</li>
+</ul>
+
+<h2>4 · Out of scope</h2>
+<p>A vertical swipe-through reel player, Shorts in search results, autoplaying tile previews,
+and a dedicated Shorts page.</p>
+
+<p class="meta" style="border-bottom:none;border-top:1px solid var(--line);padding-top:1.5rem;margin-top:3rem;">
+<span>WinTube Shorts design · 2026-08-25 · approved in session</span></p>
+</main>
