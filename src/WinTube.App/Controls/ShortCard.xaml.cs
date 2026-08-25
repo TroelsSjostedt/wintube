@@ -37,7 +37,7 @@ public sealed partial class ShortCard : UserControl
     {
         if (Video is not { } video) return;
 
-        Thumbnail.Source = new BitmapImage(
+        ThumbnailBrush.ImageSource = new BitmapImage(
             new Uri(video.ThumbnailUrl ?? VideoItem.FallbackThumbnail(video.Id)));
 
         if (video.ChannelAvatarUrl is { } avatarUrl)
@@ -62,4 +62,5 @@ public sealed partial class ShortCard : UserControl
     {
         if (Video is { } video) Clicked?.Invoke(this, video);
     }
+
 }

@@ -5,8 +5,13 @@
     Width="150" Height="267">
     <Grid Background="Transparent" Tapped="OnTapped"
           PointerEntered="OnPointerEntered" PointerExited="OnPointerExited">
-        <Border CornerRadius="8">
-            <Image x:Name="Thumbnail" Stretch="UniformToFill"/>
+        <!-- An ImageBrush, not an Image: WinUI's Image.UniformToFill crops from the top-left,
+             so a pillarboxed landscape Shorts thumbnail would show only its left blur bar.
+             The brush's default Center alignment crops to the middle, where the video is. -->
+        <Border CornerRadius="8" Width="150" Height="267">
+            <Border.Background>
+                <ImageBrush x:Name="ThumbnailBrush" Stretch="UniformToFill"/>
+            </Border.Background>
         </Border>
         <Ellipse x:Name="Avatar" Width="24" Height="24" Margin="0,0,6,6"
                  HorizontalAlignment="Right" VerticalAlignment="Bottom"
