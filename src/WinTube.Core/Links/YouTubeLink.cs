@@ -95,6 +95,10 @@ public static partial class YouTubeLink
     {
         if (!group.Success) return true;
         if (!long.TryParse(group.Value, out var value)) return false;
+        // Guard the multiply itself, before it runs: value * multiplier can silently wrap a
+        // long (e.g. value = long.MaxValue) into a negative number that would then slip past
+        // a post-multiply "<= int.MaxValue" check.
+        if (value < 0 || value > int.MaxValue / multiplier) return false;
         total += value * multiplier;
         return total <= int.MaxValue;
     }

@@ -66,6 +66,13 @@ public class YouTubeLinkTests
         Assert.Equal((Id, (TimeSpan?)null), parsed);
     }
 
+    [Fact]
+    public void TryParse_MultiplyOverflowingStartTime_StillParsesTheVideo()
+    {
+        var parsed = YouTubeLink.TryParse($"https://youtu.be/{Id}?t=9223372036854775807h");
+        Assert.Equal((Id, (TimeSpan?)null), parsed);
+    }
+
     [Theory]
     [InlineData(754, "12:34")]
     [InlineData(3754, "1:02:34")]
