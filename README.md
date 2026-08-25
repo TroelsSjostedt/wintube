@@ -59,6 +59,14 @@ This **is NOT YouTube ad blocking**: pre-rolls and mid-rolls never reach the app
 
 Each segment is skipped at most once per playback. If you rewind into a skipped stretch, it plays normally — the skip only fires on forward playback. Videos with no submissions play exactly as before. SponsorBlock is best-effort; if the service is down or slow, the video plays with no interruption — the skip fetch fires after playback starts, never blocks the first frame.
 
+## Opening and sharing links
+
+Copy a video's YouTube URL from the player with a single click, or with the current playback position. The copy button is a SplitButton in the title bar: tap to copy as `https://youtu.be/{id}`, or open the chevron for "Copy link at 12:34" to include the position as a `?t=` parameter — useful for jumping to a specific moment when passing around a video.
+
+Open YouTube links in WinTube three ways: paste a URL directly into Search and the player opens immediately; run `WinTube.App.exe <url>` from the command line or any tool; or register the app for `wintube://watch?v=…` URIs so tools and web automation can target it. All three parse the same YouTube link grammar — any `youtube.com`, `youtu.be`, shorts, or music URL, with optional start times in any form (`t=754`, `t=12m34s`, `start=1h2m3s`). The app runs single-instance: a second launch of any kind fronts the existing window and plays the target immediately.
+
+**Honest limitation:** clicking a `youtube.com` link in a browser still opens the browser — Windows has no per-site handler for desktop apps short of becoming the default browser, which this app will not do. What this stage delivers is the three ways in above.
+
 ## First run
 
 The one real technical risk the design spec called out (§3, "stage-0 playback gate") — whether
@@ -95,12 +103,12 @@ ever regresses.
 | Multiple profiles | Later | Profile id (`sha256(obfuscatedGaiaId)`) is stored from day one so this needs no migration. |
 | Appwrite watch-progress sync | **In (stage 2)** | Shares rows with the Apple TV; see the sync section above. |
 | SponsorBlock | **In (stage 3)** | Automatic skipping of sponsor reads and similar non-content. See the SponsorBlock section above. |
+| Copy YouTube URL | **In (stage 4)** | With or without a timestamp for the current position. |
+| Open YouTube links in the app | **In (stage 4)** | Search box, command line, and `wintube://` protocol; single-instance. |
 | Preview on hover/focus | Later | |
 | Shorts | Later | Filtered out entirely in v1. |
 | Channels / subscriptions | Later | |
 | Comments | Later | |
-| Copy YouTube URL | Later | With or without a timestamp for the current position. |
-| Open YouTube links in the app | Later | Register for `youtube.com`/`youtu.be` links. |
 | News banner | Never | Not wanted on Windows. |
 | Top Shelf | Never | No Windows equivalent. |
 

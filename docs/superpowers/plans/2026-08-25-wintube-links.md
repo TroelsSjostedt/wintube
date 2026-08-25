@@ -51,7 +51,7 @@ tests/WinTube.Core.Tests/YouTubeLinkTests.cs
   `(string VideoId, TimeSpan? StartAt)? TryParse(string text)`,
   `string Format(TimeSpan position)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/WinTube.Core.Tests/YouTubeLinkTests.cs`:
 
@@ -128,11 +128,11 @@ public class YouTubeLinkTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: compile FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/WinTube.Core/Links/YouTubeLink.cs`:
 
@@ -237,11 +237,11 @@ public static partial class YouTubeLink
 
 Note: `StartPattern` matches the empty string (all groups optional) — but `ParseStart` only runs on non-empty values, and a non-empty value that matches with NO successful groups is impossible (some digits must have matched); a value like `"abc"` fails the match → null, which the `t=abc` test pins.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (the Theories expand to ~22 new cases).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: YouTube link grammar (build, parse, format)"
@@ -330,13 +330,13 @@ Code-behind:
         }
 ```
 
-- [ ] **Step 1: Implement** the five changes.
+- [x] **Step 1: Implement** the five changes.
 
-- [ ] **Step 2: Build and test**
+- [x] **Step 2: Build and test**
 
 Run: `dotnet build src/WinTube.App -p:Platform=x64` (or `-c Release` under the known VS lock) and `dotnet test tests/WinTube.Core.Tests` — all green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A && git commit -m "feat: copy-link split button and URL-aware search"
@@ -449,13 +449,13 @@ public static class ProtocolRegistration
    do nothing (login page is already showing); else front the window (`Activate()`) and
    `RootFrame.Navigate(typeof(Views.PlayerPage), new PlayerRequest(new VideoItem { Id = videoId, Title = "", ThumbnailUrl = VideoItem.FallbackThumbnail(videoId) }, startAt));`.
 
-- [ ] **Step 1: Implement** the five changes.
+- [x] **Step 1: Implement** the five changes.
 
-- [ ] **Step 2: Build and test**
+- [x] **Step 2: Build and test**
 
 Run: `dotnet build src/WinTube.App -p:Platform=x64` (or `-c Release` under the known VS lock) and `dotnet test tests/WinTube.Core.Tests` — all green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A && git commit -m "feat: single-instance activation, wintube protocol, command-line open"
@@ -468,11 +468,12 @@ git add -A && git commit -m "feat: single-instance activation, wintube protocol,
 **Files:**
 - Modify: `README.md`, `docs/superpowers/plans/2026-08-25-wintube-links.md`
 
-- [ ] **Step 1: README** — an "Opening and sharing links" section in the metube voice: the copy SplitButton (plain / at position, youtu.be form); the three ways in (paste a URL in Search, `WinTube.App.exe <url>`, `wintube://watch?v=…`); single instance; the honest browser limitation verbatim from the spec's callout. Scope table: move BOTH rows — "Copy YouTube URL" and "Open YouTube links in the app" — to "In (stage 4)".
+- [x] **Step 1: README** — an "Opening and sharing links" section in the metube voice: the copy SplitButton (plain / at position, youtu.be form); the three ways in (paste a URL in Search, `WinTube.App.exe <url>`, `wintube://watch?v=…`); single instance; the honest browser limitation verbatim from the spec's callout. Scope table: move BOTH rows — "Copy YouTube URL" and "Open YouTube links in the app" — to "In (stage 4)".
 
-- [ ] **Step 2: Tick the executed checkboxes** in this plan (UTF-8-safe tooling — the file carries em-dashes).
+- [x] **Step 2: Tick the executed checkboxes** in this plan (UTF-8-safe tooling — the file carries em-dashes).
 
-- [ ] **Step 3: MANUAL VERIFICATION (the user)** — leave unticked with an italic deferral note:
+- [ ] **Step 3: MANUAL VERIFICATION (the user)**
+  *Deferred: the user verifies clipboard, search-URL and protocol activation.*
   1. Copy link → clipboard holds `https://youtu.be/{id}`; chevron → "Copy link at 12:34" → `?t=754`.
   2. Paste a timestamped YouTube link in Search → the player opens at that position.
   3. With the app running: `start wintube://watch?v=dQw4w9WgXcQ` in a terminal → the existing window fronts and plays; with the app closed, the same command starts it and plays.
