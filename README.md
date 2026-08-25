@@ -106,7 +106,7 @@ ever regresses.
 | Copy YouTube URL | **In (stage 4)** | With or without a timestamp for the current position. |
 | Open YouTube links in the app | **In (stage 4)** | Search box, command line, and `wintube://` protocol; single-instance. |
 | Preview on hover/focus | Later | |
-| Shorts | Later | Filtered out entirely in v1. |
+| Shorts | **In (stage 5)** | Own row with portrait tiles, plays in the ordinary player; strays are moved, never lost. |
 | Channels / subscriptions | Later | |
 | Comments | Later | |
 | News banner | Never | Not wanted on Windows. |

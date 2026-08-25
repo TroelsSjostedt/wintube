@@ -46,7 +46,7 @@ tests/WinTube.Core.Tests/FeedSectionTests.cs Admitting
   `FeedService.LoadMoreItemsAsync` now returns raw (unfiltered) items; `FeedPage.Sections` may
   contain `IsShorts: true` sections whose items all have `IsShort = true`.
 
-- [ ] **Step 1: Write/modify the failing tests**
+- [x] **Step 1: Write/modify the failing tests**
 
 New `tests/WinTube.Core.Tests/FeedSectionTests.cs`:
 
@@ -166,11 +166,11 @@ Add:
 
 (`Search_ReturnsFlatListWithoutShorts` stays untouched — the search filter is unchanged.)
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: FAIL (new assertions against drop-behavior code).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/WinTube.Core/Models/FeedModels.cs`, on `FeedSection`:
 
@@ -291,7 +291,7 @@ Run: `dotnet test tests/WinTube.Core.Tests` — expected: FAIL (new assertions a
             sections[first] = sections[first] with { Title = "Continue watching" };
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (154 − 0 rewritten + 5 new/changed ≈ 159; the exact count from the run is the record).
 
@@ -300,6 +300,8 @@ Run: `dotnet test tests/WinTube.Core.Tests` — expected: PASS (154 − 0 rewrit
 ```bash
 git add -A && git commit -m "feat: keep Shorts rows in the feed with per-row admitting"
 ```
+
+- [x] **Step 5: Commit**
 
 ---
 
@@ -321,9 +323,9 @@ Requirements:
 4. **Click**: ShortCard → `Frame.Navigate(typeof(PlayerPage), new PlayerRequest(video))` — same as VideoCard.
 5. `History.Remember` keeps receiving all loaded items (Shorts included), unchanged.
 
-- [ ] **Step 1: Implement** per the requirements.
+- [x] **Step 1: Implement** per the requirements.
 
-- [ ] **Step 2: Build and test**
+- [x] **Step 2: Build and test**
 
 Run: `dotnet build src/WinTube.App -p:Platform=x64` (Release fallback under the known lock) and `dotnet test tests/WinTube.Core.Tests` — all green.
 
@@ -333,6 +335,8 @@ Run: `dotnet build src/WinTube.App -p:Platform=x64` (Release fallback under the 
 git add -A && git commit -m "feat: portrait Shorts row in Home"
 ```
 
+- [x] **Step 3: Commit**
+
 ---
 
 ### Task 3: Wrap-up — README, plan ticks, manual verification
@@ -340,16 +344,18 @@ git add -A && git commit -m "feat: portrait Shorts row in Home"
 **Files:**
 - Modify: `README.md`, `docs/superpowers/plans/2026-08-25-wintube-shorts.md`
 
-- [ ] **Step 1: README** — scope table: "Shorts" row → "In (stage 5)" with a one-liner (own row, portrait tiles, plays in the ordinary player; strays are moved, never lost). No new section needed — one row-note carries it.
+- [x] **Step 1: README** — scope table: "Shorts" row → "In (stage 5)" with a one-liner (own row, portrait tiles, plays in the ordinary player; strays are moved, never lost). No new section needed — one row-note carries it.
 
-- [ ] **Step 2: Tick executed checkboxes** in this plan (UTF-8-safe tooling — em-dashes).
+- [x] **Step 2: Tick executed checkboxes** in this plan (UTF-8-safe tooling — em-dashes).
 
 - [ ] **Step 3: MANUAL VERIFICATION (the user)** — leave unticked with an italic deferral note:
   1. Home shows a Shorts row of portrait tiles (no titles/durations on them).
   2. A tile plays in the normal player; SponsorBlock/copy/progress work as on any video.
   3. No portrait Shorts inside ordinary rows.
 
-- [ ] **Step 4: Final gates and commit**
+  *Deferred: the user verifies the Shorts row on the live feed.*
+
+- [x] **Step 4: Final gates and commit**
 
 Run: `dotnet test tests/WinTube.Core.Tests` and `dotnet build src/WinTube.App -p:Platform=x64`.
 
