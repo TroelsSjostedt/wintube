@@ -84,6 +84,65 @@ public sealed class FeedService(InnerTubeClient innerTube)
         return new FeedRowPage(items, Continuation(doc.RootElement, RowContainers));
     }
 
+    /// The tvOS Home collage: three feeds fetched in parallel, interleaved by a fixed rule.
+    /// A failed supplementary feed just leaves its rows out; only the Home fetch throws.
+    public async Task<CompositeHomePage> LoadCompositeHomeAsync(
+        string accessToken, CancellationToken ct = default)
+    {
+        var homeTask = LoadHomeAsync(accessToken, ct);
+        var subscriptionsTask = Quietly(LoadSubscriptionsFeedAsync(accessToken, ct));
+        var historyTask = Quietly(LoadHistoryFeedAsync(accessToken, ct));
+        var home = await homeTask;
+        var subscriptions = await subscriptionsTask;
+        var history = await historyTask;
+
+        // Home's lead: everything up to and including the first non-Shorts row. A response
+        // that is all Shorts rows leads with all of them.
+        var firstNonShorts = home.Sections.ToList().FindIndex(section => !section.IsShorts);
+        var leadCount = firstNonShorts >= 0 ? firstNonShorts + 1 : home.Sections.Count;
+
+        var composed = new List<(FeedSection Section, bool IsHistory)>();
+        composed.AddRange(home.Sections.Take(leadCount).Select(s => (s, false)));
+        if (subscriptions is not null)
+            composed.AddRange(subscriptions.Sections.Select(s => (s, false)));
+        composed.AddRange(home.Sections.Skip(leadCount).Select(s => (s, false)));
+        if (history is not null)
+            composed.AddRange(history.Sections.Select(s => (s, true)));
+
+        var deduped = DedupeShortsAcross(composed);
+        return new CompositeHomePage(
+            deduped.Select(entry => entry.Section).ToList(),
+            home.Continuation,
+            deduped.Count(entry => entry.IsHistory));
+    }
+
+    private static async Task<FeedPage?> Quietly(Task<FeedPage> fetch)
+    {
+        try { return await fetch; }
+        catch { return null; }
+    }
+
+    /// A later Shorts row drops the ids an earlier one already shows; one emptied by that
+    /// is removed entirely.
+    private static List<(FeedSection Section, bool IsHistory)> DedupeShortsAcross(
+        List<(FeedSection Section, bool IsHistory)> sections)
+    {
+        var shown = new HashSet<string>();
+        var result = new List<(FeedSection, bool)>();
+        foreach (var (section, isHistory) in sections)
+        {
+            if (!section.IsShorts)
+            {
+                result.Add((section, isHistory));
+                continue;
+            }
+            var fresh = section.Items.Where(item => shown.Add(item.Id)).ToList();
+            if (fresh.Count == 0) continue;
+            result.Add((section with { Items = fresh }, isHistory));
+        }
+        return result;
+    }
+
     private Task<JsonDocument> BrowseAsync(
         Dictionary<string, object?> parameters, string accessToken, CancellationToken ct) =>
         innerTube.PostAsync("browse", ClientKind.Tv, parameters, bearer: accessToken, ct: ct);

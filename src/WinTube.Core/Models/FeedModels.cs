@@ -25,3 +25,9 @@ public sealed record FeedRowPage(IReadOnlyList<VideoItem> Items, string? Continu
 /// IsSubscribed is null when the page carried no subscribe button — "unknown", never "no".
 public sealed record ChannelPage(
     string Title, string? AvatarUrl, string? BannerUrl, bool? IsSubscribed, FeedPage Feed);
+
+/// The stitched Home screen: Home's own shelves with the subscriptions feed's rows woven in
+/// after the first non-Shorts row and the history rows at the end. HistoryRowCount says how
+/// many trailing sections are history, so paging can insert new Home shelves above them.
+public sealed record CompositeHomePage(
+    IReadOnlyList<FeedSection> Sections, string? Continuation, int HistoryRowCount);

@@ -33,6 +33,27 @@ public class FeedServiceTests
         return (new FeedService(client), new SearchService(client));
     }
 
+    /// Routes each browse request by the browseId in its body; unrouted ids fail with 500.
+    private static FeedService MakeRouted(Dictionary<string, string> responsesByBrowseId)
+    {
+        var handler = new StubHttpHandler((_, body) =>
+        {
+            foreach (var (browseId, response) in responsesByBrowseId)
+                if (body.Contains($"\"browseId\":\"{browseId}\""))
+                    return StubHttpHandler.JsonResponse(response);
+            return StubHttpHandler.JsonResponse("{}", 500);
+        });
+        return new FeedService(new InnerTubeClient(new HttpClient(handler), new Secrets("K", "", "")));
+    }
+
+    private static string Shelf(string title, params string[] tiles) =>
+        "{\"shelfRenderer\":{" +
+        "\"headerRenderer\":{\"shelfHeaderRenderer\":{\"title\":{\"simpleText\":\"" + title + "\"}}}," +
+        "\"content\":{\"horizontalListRenderer\":{\"items\":[" + string.Join(",", tiles) + "]}}}}";
+
+    private static string SectionList(params string[] shelves) =>
+        "{\"contents\":{\"sectionListRenderer\":{\"contents\":[" + string.Join(",", shelves) + "]}}}";
+
     [Fact]
     public async Task Home_ParsesShelvesWithTitlesRowTokensAndPageToken()
     {
@@ -249,5 +270,61 @@ public class FeedServiceTests
         Assert.Null(page.AvatarUrl);
         Assert.Null(page.BannerUrl);
         Assert.Null(page.IsSubscribed);   // no button is "unknown", never "no"
+    }
+
+    [Fact]
+    public async Task CompositeHome_InterleavesInTheTvosOrder()
+    {
+        var feed = MakeRouted(new()
+        {
+            ["default"] = SectionList(Shelf("Recommended", Tile("h1")), Shelf("New to you", Tile("h2"))),
+            ["FEsubscriptions"] = SectionList(Shelf("Today", Tile("s1"))),
+            ["FEhistory"] = SectionList(Shelf("x", Tile("w1"))),
+        });
+        var page = await feed.LoadCompositeHomeAsync("T");
+        Assert.Equal(
+            ["Recommended", "From your subscriptions", "New to you", "Continue watching"],
+            page.Sections.Select(s => s.Title));
+        Assert.Equal(1, page.HistoryRowCount);
+    }
+
+    [Fact]
+    public async Task CompositeHome_SupplementaryFailuresAreSilent()
+    {
+        var feed = MakeRouted(new()
+        {
+            ["default"] = SectionList(Shelf("Recommended", Tile("h1"))),
+            // FEsubscriptions and FEhistory unrouted -> HTTP 500
+        });
+        var page = await feed.LoadCompositeHomeAsync("T");
+        Assert.Equal(["Recommended"], page.Sections.Select(s => s.Title));
+        Assert.Equal(0, page.HistoryRowCount);
+    }
+
+    [Fact]
+    public async Task CompositeHome_HomeFailureStillFails()
+    {
+        var feed = MakeRouted(new() { ["FEsubscriptions"] = SectionList(Shelf("Today", Tile("s1"))) });
+        await Assert.ThrowsAsync<InnerTubeException>(() => feed.LoadCompositeHomeAsync("T"));
+    }
+
+    [Fact]
+    public async Task CompositeHome_DedupesShortsAcrossFeeds_AndDropsEmptiedRows()
+    {
+        var feed = MakeRouted(new()
+        {
+            ["default"] = SectionList(
+                "{\"reelShelfRenderer\":{\"items\":[" + ShortTile("s1") + "," + ShortTile("s2") + "]}}",
+                Shelf("Recommended", Tile("h1"))),
+            ["FEsubscriptions"] = SectionList(
+                "{\"reelShelfRenderer\":{\"items\":[" + ShortTile("s1") + "]}}",
+                Shelf("Today", Tile("v1"))),
+        });
+        var page = await feed.LoadCompositeHomeAsync("T");
+        // Home's Shorts row leads (a Shorts row before the first non-Shorts row stays in the
+        // lead); the subscriptions Shorts row lost its only id to it and is dropped.
+        Assert.Equal(["Shorts", "Recommended", "From your subscriptions"],
+            page.Sections.Select(s => s.Title));
+        Assert.Equal(["s1", "s2"], page.Sections[0].Items.Select(i => i.Id));
     }
 }
