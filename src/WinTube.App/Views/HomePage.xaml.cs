@@ -16,6 +16,7 @@ public sealed partial class HomePage : Page
     private readonly ObservableCollection<ShelfViewModel> shelves = [];
     private readonly DispatcherQueue dispatcher = DispatcherQueue.GetForCurrentThread();
     private string? pageContinuation;
+    private int historyRowCount;
     private bool loadingMoreShelves;
     private Func<Task>? retryAction;
 
@@ -42,9 +43,10 @@ public sealed partial class HomePage : Page
         ErrorBar.IsOpen = false;
         try
         {
-            var page = await App.Session.RunAsync(t => App.Session.Feed.LoadHomeAsync(t));
+            var page = await App.Session.RunAsync(t => App.Session.Feed.LoadCompositeHomeAsync(t));
             shelves.Clear();
             foreach (var section in page.Sections) shelves.Add(new ShelfViewModel(section));
+            historyRowCount = page.HistoryRowCount;
             pageContinuation = page.Continuation;
             LoadMoreButton.Visibility = pageContinuation is null ? Visibility.Collapsed : Visibility.Visible;
             App.Session.History.Remember(page.Sections.SelectMany(s => s.Items));
@@ -63,7 +65,8 @@ public sealed partial class HomePage : Page
         try
         {
             var page = await App.Session.RunAsync(t => App.Session.Feed.LoadMoreShelvesAsync(continuation, t));
-            foreach (var section in page.Sections) shelves.Add(new ShelfViewModel(section));
+            foreach (var section in page.Sections)
+                shelves.Insert(shelves.Count - historyRowCount, new ShelfViewModel(section));
             pageContinuation = page.Continuation;
             LoadMoreButton.Visibility = pageContinuation is null ? Visibility.Collapsed : Visibility.Visible;
             App.Session.History.Remember(page.Sections.SelectMany(s => s.Items));
