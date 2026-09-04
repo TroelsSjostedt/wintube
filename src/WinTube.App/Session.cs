@@ -1,5 +1,6 @@
 using WinTube.Core;
 using WinTube.Core.Auth;
+using WinTube.Core.Channel;
 using WinTube.Core.Feed;
 using WinTube.Core.InnerTube;
 using WinTube.Core.Player;
@@ -25,6 +26,7 @@ public sealed class Session
     public DeviceAuthService DeviceAuth { get; }
     public AccountService Accounts { get; }
     public FeedService Feed { get; }
+    public SubscriptionService Subscriptions { get; }
     public SearchService Search { get; }
     public StreamService Streams { get; }
     public VideoMetadataService Metadata { get; }
@@ -47,6 +49,7 @@ public sealed class Session
         DeviceAuth = new DeviceAuthService(http, secrets);
         Accounts = new AccountService(InnerTube);
         Feed = new FeedService(InnerTube);
+        Subscriptions = new SubscriptionService(InnerTube);
         Search = new SearchService(InnerTube);
         var visitorData = new VisitorDataStore(http);
         Streams = new StreamService(InnerTube, visitorData);

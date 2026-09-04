@@ -1,0 +1,99 @@
+<Page
+    x:Class="WinTube.App.Views.ChannelPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:WinTube.App.Controls"
+    xmlns:local="using:WinTube.App.Views"
+    NavigationCacheMode="Required">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <Image x:Name="Banner" Height="160" Stretch="UniformToFill" Visibility="Collapsed"/>
+            <StackPanel Orientation="Horizontal" Spacing="16" Padding="24,16"
+                        VerticalAlignment="Bottom">
+                <Ellipse Width="64" Height="64">
+                    <Ellipse.Fill><ImageBrush x:Name="AvatarBrush" Stretch="UniformToFill"/></Ellipse.Fill>
+                </Ellipse>
+                <TextBlock x:Name="TitleText" VerticalAlignment="Center"
+                           Style="{StaticResource TitleTextBlockStyle}"/>
+                <ToggleButton x:Name="SubscribeButton" VerticalAlignment="Center"
+                              Visibility="Collapsed" Click="OnSubscribeToggled"/>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Padding="24" Spacing="4">
+                    <ItemsControl ItemsSource="{x:Bind shelves}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="local:ShelfViewModel">
+                                <StackPanel Spacing="8" Margin="0,0,0,24">
+                                    <TextBlock Text="{x:Bind Title}"
+                                               Visibility="{x:Bind TitleVisibility}"
+                                               Style="{StaticResource SubtitleTextBlockStyle}"/>
+                                    <ListView ItemsSource="{x:Bind Items}"
+                                              Tag="{x:Bind}"
+                                              Visibility="{x:Bind VideoRowVisibility}"
+                                              SelectionMode="None"
+                                              IsItemClickEnabled="False"
+                                              ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                              ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                              Loaded="OnRowLoaded">
+                                        <ListView.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" Spacing="12"/>
+                                            </ItemsPanelTemplate>
+                                        </ListView.ItemsPanel>
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="local:VideoCardViewModel">
+                                                <controls:VideoCard Video="{x:Bind Video}"
+                                                    ProgressFraction="{x:Bind ProgressFraction, Mode=OneWay}"
+                                                    Clicked="OnVideoCardClicked"/>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                    <ListView ItemsSource="{x:Bind Items}"
+                                              Tag="{x:Bind}"
+                                              Visibility="{x:Bind ShortRowVisibility}"
+                                              Height="267"
+                                              SelectionMode="None"
+                                              IsItemClickEnabled="False"
+                                              ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                              ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                              Loaded="OnRowLoaded">
+                                        <ListView.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" Spacing="12"/>
+                                            </ItemsPanelTemplate>
+                                        </ListView.ItemsPanel>
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="local:VideoCardViewModel">
+                                                <controls:ShortCard Video="{x:Bind Video}"
+                                                    Clicked="OnVideoCardClicked"/>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock x:Name="EmptyText" Text="This channel has nothing to show."
+                               Style="{StaticResource SubtitleTextBlockStyle}"
+                               Visibility="Collapsed"/>
+                </StackPanel>
+            </ScrollViewer>
+
+            <InfoBar x:Name="ErrorBar" Severity="Error" Title="Couldn't load the channel"
+                     IsOpen="False" VerticalAlignment="Top">
+                <InfoBar.ActionButton>
+                    <Button Content="Retry" Click="OnRetry"/>
+                </InfoBar.ActionButton>
+            </InfoBar>
+        </Grid>
+    </Grid>
+</Page>
