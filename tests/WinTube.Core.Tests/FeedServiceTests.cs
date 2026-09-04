@@ -197,4 +197,57 @@ public class FeedServiceTests
         var results = await search.SearchAsync("query", "T");
         Assert.Equal(["v1"], results.Select(i => i.Id));
     }
+
+    [Fact]
+    public async Task SubscriptionsFeed_FoldsAndRetitles_LeavingShortsAlone()
+    {
+        var (feed, _) = Make("{\"contents\":{\"sectionListRenderer\":{\"contents\":[" +
+            "{\"reelShelfRenderer\":{\"items\":[" + ShortTile("s1") + "]}}," +
+            "{\"shelfRenderer\":{" +
+            "\"headerRenderer\":{\"shelfHeaderRenderer\":{\"title\":{\"simpleText\":\"Today\"}}}," +
+            "\"content\":{\"horizontalListRenderer\":{\"items\":[" + Tile("v1") + "]}}}}," +
+            "{\"shelfRenderer\":{\"content\":{\"horizontalListRenderer\":{" +
+            "\"items\":[" + Tile("v2") + "]}}}}]}}}");
+        var page = await feed.LoadSubscriptionsFeedAsync("T");
+        Assert.Equal(2, page.Sections.Count);
+        Assert.True(page.Sections[0].IsShorts);
+        Assert.Equal("Shorts", page.Sections[0].Title);
+        Assert.Equal("From your subscriptions", page.Sections[1].Title);
+        Assert.Equal(["v1", "v2"], page.Sections[1].Items.Select(i => i.Id));
+    }
+
+    [Fact]
+    public async Task Channel_ParsesHeaderAndShelves()
+    {
+        var (feed, _) = Make("{" +
+            "\"header\":{\"channelHeaderRenderer\":{" +
+            "\"title\":{\"simpleText\":\"Veritasium\"}," +
+            "\"avatar\":{\"thumbnails\":[{\"url\":\"https://yt3.ggpht.com/a=s88\",\"width\":88}]}," +
+            "\"banner\":{\"thumbnails\":[" +
+            "{\"url\":\"//i.ytimg.com/banner-small\",\"width\":320}," +
+            "{\"url\":\"https://i.ytimg.com/banner-big\",\"width\":2120}]}," +
+            "\"subscribeButtonRenderer\":{\"subscribed\":true}}}," +
+            "\"contents\":{\"sectionListRenderer\":{\"contents\":[{\"shelfRenderer\":{" +
+            "\"headerRenderer\":{\"shelfHeaderRenderer\":{\"title\":{\"simpleText\":\"Videos\"}}}," +
+            "\"content\":{\"horizontalListRenderer\":{\"items\":[" + Tile("v1") + "]}}}}]}}}");
+        var page = await feed.LoadChannelAsync("UCx", "T");
+        Assert.Equal("Veritasium", page.Title);
+        Assert.Equal("https://yt3.ggpht.com/a=s88", page.AvatarUrl);
+        Assert.Equal("https://i.ytimg.com/banner-big", page.BannerUrl);
+        Assert.True(page.IsSubscribed);
+        Assert.Equal("Videos", Assert.Single(page.Feed.Sections).Title);
+    }
+
+    [Fact]
+    public async Task Channel_MissingHeaderPieces_AreNullNotWrong()
+    {
+        var (feed, _) = Make("{\"contents\":{\"sectionListRenderer\":{\"contents\":[" +
+            "{\"shelfRenderer\":{\"content\":{\"horizontalListRenderer\":{" +
+            "\"items\":[" + Tile("v1") + "]}}}}]}}}");
+        var page = await feed.LoadChannelAsync("UCx", "T");
+        Assert.Equal("", page.Title);
+        Assert.Null(page.AvatarUrl);
+        Assert.Null(page.BannerUrl);
+        Assert.Null(page.IsSubscribed);   // no button is "unknown", never "no"
+    }
 }

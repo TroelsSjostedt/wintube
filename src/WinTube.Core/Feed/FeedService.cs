@@ -29,17 +29,41 @@ public sealed class FeedService(InnerTubeClient innerTube)
     /// The account's own history feed. TVHTML5 hands it back pre-chunked into rows where only
     /// the first carries a header, so the untitled chunks are folded back into their row and
     /// the row is retitled to name the feed.
-    public async Task<FeedPage> LoadHistoryFeedAsync(
-        string accessToken, CancellationToken ct = default)
+    public Task<FeedPage> LoadHistoryFeedAsync(string accessToken, CancellationToken ct = default) =>
+        LoadSupplementaryAsync("FEhistory", "Continue watching", accessToken, ct);
+
+    /// The account's subscriptions feed — same pre-chunked shape as History.
+    public Task<FeedPage> LoadSubscriptionsFeedAsync(string accessToken, CancellationToken ct = default) =>
+        LoadSupplementaryAsync("FEsubscriptions", "From your subscriptions", accessToken, ct);
+
+    /// A supplementary feed: pre-chunked untitled rows folded back together, and the first
+    /// non-Shorts row retitled to name the feed (a Shorts row already says what it holds).
+    private async Task<FeedPage> LoadSupplementaryAsync(
+        string browseId, string title, string accessToken, CancellationToken ct)
     {
         using var doc = await BrowseAsync(
-            new Dictionary<string, object?> { ["browseId"] = "FEhistory" }, accessToken, ct);
+            new Dictionary<string, object?> { ["browseId"] = browseId }, accessToken, ct);
         var page = ParsePage(doc.RootElement);
         var sections = FoldUntitledRows(page.Sections);
         var first = sections.FindIndex(section => !section.IsShorts);
         if (first >= 0)
-            sections[first] = sections[first] with { Title = "Continue watching" };
+            sections[first] = sections[first] with { Title = title };
         return page with { Sections = sections };
+    }
+
+    /// A channel is just another browseId; only the header parse is new.
+    public async Task<ChannelPage> LoadChannelAsync(
+        string channelId, string accessToken, CancellationToken ct = default)
+    {
+        using var doc = await BrowseAsync(
+            new Dictionary<string, object?> { ["browseId"] = channelId }, accessToken, ct);
+        var root = doc.RootElement;
+        return new ChannelPage(
+            ChannelHeaderParser.Title(root),
+            ChannelHeaderParser.AvatarUrl(root),
+            ChannelHeaderParser.BannerUrl(root),
+            ChannelHeaderParser.IsSubscribed(root),
+            ParsePage(root));
     }
 
     public async Task<FeedPage> LoadMoreShelvesAsync(

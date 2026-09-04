@@ -20,3 +20,8 @@ public sealed record FeedPage(IReadOnlyList<FeedSection> Sections, string? Conti
 
 /// One page of a single row: the videos it added plus the token for the page after it.
 public sealed record FeedRowPage(IReadOnlyList<VideoItem> Items, string? Continuation);
+
+/// A channel's browse page: who it is, and its shelves in the same shape as any feed's.
+/// IsSubscribed is null when the page carried no subscribe button — "unknown", never "no".
+public sealed record ChannelPage(
+    string Title, string? AvatarUrl, string? BannerUrl, bool? IsSubscribed, FeedPage Feed);
