@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:WinTube.App.Controls"
     xmlns:local="using:WinTube.App.Views"
-    NavigationCacheMode="Required">
+    NavigationCacheMode="Disabled">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>

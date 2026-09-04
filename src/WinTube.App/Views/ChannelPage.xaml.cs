@@ -73,7 +73,7 @@ public sealed partial class ChannelPage : Page
             {
                 SubscribeButton.Visibility = Visibility.Visible;
                 SubscribeButton.IsChecked = isSubscribed;
-                SubscribeButton.Content = isSubscribed ? "Subscribed" : "Subscribe";
+                SubscribeButton.Content = isSubscribed ? "Subscribed ✓" : "Subscribe";
             }
             else
             {
@@ -173,7 +173,7 @@ public sealed partial class ChannelPage : Page
     {
         if (channelId is not { } id) return;
         var subscribing = SubscribeButton.IsChecked == true;
-        SubscribeButton.Content = subscribing ? "Subscribed" : "Subscribe";
+        SubscribeButton.Content = subscribing ? "Subscribed ✓" : "Subscribe";
         try
         {
             if (subscribing)
@@ -184,7 +184,7 @@ public sealed partial class ChannelPage : Page
         catch (Exception ex)
         {
             SubscribeButton.IsChecked = !subscribing;
-            SubscribeButton.Content = !subscribing ? "Subscribed" : "Subscribe";
+            SubscribeButton.Content = !subscribing ? "Subscribed ✓" : "Subscribe";
             ErrorBar.Message = ex.Message;
             ErrorBar.IsOpen = true;
             retryAction = null;

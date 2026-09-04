@@ -68,7 +68,7 @@ public sealed partial class VideoCard : UserControl
         AuthorText.Visibility = hasChannel ? Visibility.Visible : Visibility.Collapsed;
         var rest = hasChannel ? ComposeSubtitle(video with { Author = "" }) : ComposeSubtitle(video);
         RestText.Text = hasChannel && rest.Length > 0 ? " · " + rest : rest;
-        GoToChannelItem.IsEnabled = video.ChannelId is not null;
+        GoToChannelItem.Visibility = video.ChannelId is not null ? Visibility.Visible : Visibility.Collapsed;
         RenderProgress();
     }
 

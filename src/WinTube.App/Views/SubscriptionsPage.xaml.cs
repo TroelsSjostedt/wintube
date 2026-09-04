@@ -65,7 +65,7 @@ public sealed partial class SubscriptionsPage : Page
     private void OnChannelClicked(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not SubscriptionItemViewModel channel) return;
-        Frame.Navigate(typeof(ChannelPage), new ChannelRequest(channel.Id, channel.Title));
+        Frame.Navigate(typeof(ChannelPage), new ChannelRequest(channel.Id, channel.DisplayName));
     }
 }
 

@@ -32,7 +32,8 @@
                    FontWeight="SemiBold"/>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,2,0,0" Spacing="0">
-            <TextBlock x:Name="AuthorText" FontSize="12"
+            <TextBlock x:Name="AuthorText" FontSize="12" MaxWidth="200"
+                       TextTrimming="CharacterEllipsis"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        PointerEntered="OnAuthorEntered" PointerExited="OnAuthorExited"
                        Tapped="OnAuthorTapped"/>
