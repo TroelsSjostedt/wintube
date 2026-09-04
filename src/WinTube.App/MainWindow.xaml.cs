@@ -75,6 +75,7 @@ public sealed partial class MainWindow : Window
         var target = tag switch
         {
             "Search" => typeof(Views.SearchPage),
+            "Subscriptions" => typeof(Views.SubscriptionsPage),
             "History" => typeof(Views.HistoryPage),
             _ => typeof(Views.HomePage),
         };

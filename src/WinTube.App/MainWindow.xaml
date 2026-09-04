@@ -8,6 +8,7 @@
         <NavigationView.MenuItems>
             <NavigationViewItem x:Name="HomeItem" Content="Home" Tag="Home"/>
             <NavigationViewItem x:Name="SearchItem" Content="Search" Tag="Search"/>
+            <NavigationViewItem x:Name="SubscriptionsItem" Content="Subscriptions" Tag="Subscriptions"/>
             <NavigationViewItem x:Name="HistoryItem" Content="History" Tag="History"/>
         </NavigationView.MenuItems>
         <NavigationView.PaneFooter>
