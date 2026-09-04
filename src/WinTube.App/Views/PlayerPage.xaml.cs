@@ -1,6 +1,7 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Media.Core;
@@ -49,6 +50,11 @@ public sealed partial class PlayerPage : Page
         video = request.Video;
         startAt = request.StartAt;
         TitleText.Text = video.Title;
+
+        var hasChannel = video.ChannelId is not null && video.Author.Length > 0;
+        AuthorLink.Text = hasChannel ? video.Author : "";
+        AuthorLink.Visibility = hasChannel ? Visibility.Visible : Visibility.Collapsed;
+
         leftPage = false;
         retried = false;
         _ = StartAsync(after: null);
@@ -337,6 +343,20 @@ public sealed partial class PlayerPage : Page
     }
 
     private void OnBack(object sender, RoutedEventArgs e) => Frame.GoBack();
+
+    // MARK: channel link
+
+    private void OnAuthorEntered(object sender, PointerRoutedEventArgs e) =>
+        AuthorLink.TextDecorations = Windows.UI.Text.TextDecorations.Underline;
+
+    private void OnAuthorExited(object sender, PointerRoutedEventArgs e) =>
+        AuthorLink.TextDecorations = Windows.UI.Text.TextDecorations.None;
+
+    private void OnAuthorTapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (video?.ChannelId is not { } channelId) return;
+        Frame.Navigate(typeof(ChannelPage), new ChannelRequest(channelId, video.Author));
+    }
 
     // MARK: copy link
 

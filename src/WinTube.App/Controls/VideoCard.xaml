@@ -9,6 +9,11 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
+        <Grid.ContextFlyout>
+            <MenuFlyout>
+                <MenuFlyoutItem x:Name="GoToChannelItem" Text="Go to channel" Click="OnGoToChannel"/>
+            </MenuFlyout>
+        </Grid.ContextFlyout>
 
         <!-- Thumbnail with duration badge and progress line overlaid on top of it. -->
         <Grid Grid.Row="0">
@@ -26,8 +31,14 @@
                    TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
                    FontWeight="SemiBold"/>
 
-        <TextBlock x:Name="SubtitleText" Grid.Row="2" Margin="0,2,0,0"
-                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12"
-                   TextTrimming="CharacterEllipsis"/>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,2,0,0" Spacing="0">
+            <TextBlock x:Name="AuthorText" FontSize="12"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       PointerEntered="OnAuthorEntered" PointerExited="OnAuthorExited"
+                       Tapped="OnAuthorTapped"/>
+            <TextBlock x:Name="RestText" FontSize="12"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextTrimming="CharacterEllipsis"/>
+        </StackPanel>
     </Grid>
 </UserControl>

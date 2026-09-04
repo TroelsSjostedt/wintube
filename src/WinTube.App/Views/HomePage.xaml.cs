@@ -175,4 +175,10 @@ public sealed partial class HomePage : Page
 
     private void OnVideoCardClicked(object sender, VideoItem video) =>
         Frame.Navigate(typeof(PlayerPage), new PlayerRequest(video));
+
+    private void OnChannelClicked(object sender, VideoItem video)
+    {
+        if (video.ChannelId is not { } channelId) return;
+        Frame.Navigate(typeof(ChannelPage), new ChannelRequest(channelId, video.Author));
+    }
 }

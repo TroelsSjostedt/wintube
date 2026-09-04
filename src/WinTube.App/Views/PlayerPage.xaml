@@ -5,9 +5,15 @@
     <Grid RowDefinitions="Auto,*" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid Grid.Row="0" Padding="12,8" ColumnDefinitions="Auto,*,Auto">
             <Button x:Name="BackButton" Grid.Column="0" Content="Back" Click="OnBack"/>
-            <TextBlock x:Name="TitleText" Grid.Column="1" Margin="12,0,0,0"
-                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                       Style="{StaticResource SubtitleTextBlockStyle}"/>
+            <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis"
+                           Style="{StaticResource SubtitleTextBlockStyle}"/>
+                <TextBlock x:Name="AuthorLink" FontSize="12" Margin="0,2,0,0"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           TextTrimming="CharacterEllipsis"
+                           PointerEntered="OnAuthorEntered" PointerExited="OnAuthorExited"
+                           Tapped="OnAuthorTapped"/>
+            </StackPanel>
             <SplitButton x:Name="CopyLinkButton" Grid.Column="2" Click="OnCopyLink" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                     <FontIcon Glyph="&#xE71B;" FontSize="14"/>

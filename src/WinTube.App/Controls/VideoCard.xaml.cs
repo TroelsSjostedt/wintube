@@ -8,9 +8,10 @@ using WinTube.Core.Models;
 namespace WinTube.App.Controls;
 
 /// The reusable video tile: 16:9 thumbnail, duration badge, a red "how far in" progress line,
-/// a two-line title, and a muted "Author · ViewCount · age" line. Stateless beyond its two
-/// dependency properties — callers (HomePage, and later Search/History) own the paging and
-/// progress-tracking state, this just renders one VideoItem.
+/// a two-line title, and a muted "Author · ViewCount · age" line split so the author half is
+/// its own clickable/hoverable link into ChannelPage. Stateless beyond its two dependency
+/// properties — callers (HomePage, Search/History/Channel) own the paging and progress-tracking
+/// state, this just renders one VideoItem.
 public sealed partial class VideoCard : UserControl
 {
     private const double CardWidth = 320;
@@ -39,6 +40,10 @@ public sealed partial class VideoCard : UserControl
     /// Raised on tap/click; carries the video so callers don't need to re-read the property.
     public event EventHandler<VideoItem>? Clicked;
 
+    /// Raised when the channel name (or the context menu's Go to channel) is picked.
+    /// Only wired to cells that carried a ChannelId.
+    public event EventHandler<VideoItem>? ChannelClicked;
+
     public VideoCard() => InitializeComponent();
 
     private static void OnVideoChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
@@ -58,7 +63,12 @@ public sealed partial class VideoCard : UserControl
         DurationText.Text = video.Duration;
         DurationBadge.Visibility = video.Duration.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        SubtitleText.Text = ComposeSubtitle(video);
+        var hasChannel = video.ChannelId is not null && video.Author.Length > 0;
+        AuthorText.Text = hasChannel ? video.Author : "";
+        AuthorText.Visibility = hasChannel ? Visibility.Visible : Visibility.Collapsed;
+        var rest = hasChannel ? ComposeSubtitle(video with { Author = "" }) : ComposeSubtitle(video);
+        RestText.Text = hasChannel && rest.Length > 0 ? " · " + rest : rest;
+        GoToChannelItem.IsEnabled = video.ChannelId is not null;
         RenderProgress();
     }
 
@@ -84,5 +94,22 @@ public sealed partial class VideoCard : UserControl
     private void OnTapped(object sender, TappedRoutedEventArgs e)
     {
         if (Video is { } video) Clicked?.Invoke(this, video);
+    }
+
+    private void OnAuthorEntered(object sender, PointerRoutedEventArgs e) =>
+        AuthorText.TextDecorations = Windows.UI.Text.TextDecorations.Underline;
+
+    private void OnAuthorExited(object sender, PointerRoutedEventArgs e) =>
+        AuthorText.TextDecorations = Windows.UI.Text.TextDecorations.None;
+
+    private void OnAuthorTapped(object sender, TappedRoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (Video is { } video) ChannelClicked?.Invoke(this, video);
+    }
+
+    private void OnGoToChannel(object sender, RoutedEventArgs e)
+    {
+        if (Video is { } video) ChannelClicked?.Invoke(this, video);
     }
 }

@@ -32,7 +32,8 @@
                                         <DataTemplate x:DataType="local:VideoCardViewModel">
                                             <controls:VideoCard Video="{x:Bind Video}"
                                                 ProgressFraction="{x:Bind ProgressFraction, Mode=OneWay}"
-                                                Clicked="OnVideoCardClicked"/>
+                                                Clicked="OnVideoCardClicked"
+                                                ChannelClicked="OnChannelClicked"/>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
                                 </ListView>
