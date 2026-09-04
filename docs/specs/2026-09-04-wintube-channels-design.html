@@ -1,0 +1,141 @@
+<title>WinTube Channels</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5; --ink: #24211E; --muted: #6B645C; --accent: #A63D2F;
+    --line: #E4DFD8; --card: #FFFFFF; --code-bg: #F1EDE7; --sub: #2F6B4F; --subbg: #E7F0EA;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+      --line: #35302B; --card: #242019; --code-bg: #262119; --sub: #7FB99A; --subbg: #22302A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+    --line: #35302B; --card: #242019; --code-bg: #262119; --sub: #7FB99A; --subbg: #22302A;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: "Public Sans", "Segoe UI", system-ui, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; padding: 0 1.25rem 6rem; }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2 { font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  p { margin: .75rem 0; }
+  a { color: var(--accent); }
+  code, pre { font-family: "IBM Plex Mono", Consolas, monospace; font-size: .85em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  .eyebrow { font-family: "Schibsted Grotesk", sans-serif; font-size: .72rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 3.5rem 0 .25rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; color: var(--muted); font-size: .85rem; margin: 1rem 0 0; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: "Schibsted Grotesk", sans-serif; font-size: .78rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: .4rem .75rem .4rem 0; }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .75rem .55rem 0; vertical-align: top; }
+  td:first-child, th:first-child { padding-left: 0; }
+  ul { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+  .collage { display: grid; gap: .4rem; margin: 1.25rem 0; }
+  .collage .row { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: .5rem .9rem; font-size: .88rem; display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+  .collage .row span { color: var(--muted); font-size: .78rem; white-space: nowrap; }
+  .collage .row.sub { border-color: var(--sub); background: var(--subbg); }
+  .collage .row.sub span { color: var(--sub); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Stage 6 · Approved 2026-09-04</p>
+  <h1>WinTube Channels</h1>
+  <p>Channels and subscriptions, ported whole from tvOS: the subscriptions feed woven into Home
+  the way the Apple TV composes it, clickable channel pages with a subscribe toggle, and a
+  Subscriptions screen listing every channel the account follows.</p>
+  <div class="meta">
+    <span><b>Why now</b> The composite Home is where the reliable Shorts row lives — YouTube's bare Home response often carries none</span>
+    <span><b>Base</b> WinTube stages 1–5</span>
+  </div>
+</header>
+
+<h2>1 · The composite Home (from HomeView.swift)</h2>
+<p>tvOS Home is a collage of three browse feeds, fetched in parallel and interleaved by a fixed
+rule. WinTube adopts it verbatim — this is what makes the two devices show the same screen:</p>
+<div class="collage">
+  <div class="row"><b>Recommended</b><span>Home (`default`) — shelves up to and including the first non-Shorts row</span></div>
+  <div class="row sub"><b>From your subscriptions</b><span>FEsubscriptions — first row, retitled</span></div>
+  <div class="row sub"><b>Shorts</b><span>FEsubscriptions — its remaining rows, Shorts row included</span></div>
+  <div class="row"><b>New to you, …</b><span>Home — the rest; "Load more" grows this part</span></div>
+  <div class="row"><b>Continue watching</b><span>FEhistory rows, always last</span></div>
+</div>
+<ul>
+  <li><b><code>FeedService.LoadCompositeHomeAsync</code></b> fetches <code>default</code>,
+  <code>FEsubscriptions</code> and <code>FEhistory</code> in parallel and merges as above. The
+  lead/trailing split of the Home shelves is positional: everything up to and including the
+  first non-Shorts section leads (a response opening with a Shorts row keeps it in the lead).</li>
+  <li><b>Supplementary failure is silent.</b> A failed subscriptions or history fetch just
+  leaves its rows out — Home renders regardless. Only the Home fetch itself can fail the page.</li>
+  <li><b>The subscriptions feed folds like History:</b> untitled chunk rows fold into the
+  titled row above (existing <code>FoldUntitledRows</code>), the first non-Shorts row is
+  retitled <code>"From your subscriptions"</code>, its Shorts row passes through untouched.</li>
+  <li><b>Paging:</b> the page-level continuation is Home's own and appends to the trailing
+  Home part, before the history rows. Row (sideways) paging is unchanged. Each response's own
+  Shorts handling (<code>Merging</code>) is per-feed; the composite adds one cross-feed pass
+  that drops from later Shorts rows any id an earlier one already shows — a Short in the
+  subscriptions row is not repeated by a Home or history one.</li>
+</ul>
+
+<h2>2 · Core services</h2>
+<div class="table-wrap"><table>
+  <tr><th>Piece</th><th>Decision</th></tr>
+  <tr><td><code>FeedService.LoadChannelAsync(id)</code></td><td>A channel is just another <code>browseId</code> (<code>UC…</code>). Same browse call, same shelf parsing; new header parse for title, avatar, banner (16:9, may be absent) and <code>IsSubscribed</code> read from the page's own subscribe button — <code>null</code> when the page carried no button, which callers must treat as "unknown", not "no".</td></tr>
+  <tr><td><code>ChannelPage</code> model</td><td><code>(Title, AvatarUrl, BannerUrl, IsSubscribed, Feed)</code> — <code>Feed</code> is an ordinary <code>FeedPage</code>, so the channel screen reuses every row behavior Home has, Shorts rows included.</td></tr>
+  <tr><td><code>SubscriptionService</code></td><td><code>SubscribeAsync</code>/<code>UnsubscribeAsync</code> post <code>subscription/subscribe|unsubscribe</code> with <code>channelIds: [id]</code>; success is any 2xx. <code>LoadSubscriptionsAsync</code> browses <code>FEchannels</code> and returns the channels in response order plus the id set.</td></tr>
+  <tr><td>FEchannels fallback</td><td>Ported from tvOS: if the cells don't parse but <code>UC…</code> ids are found, list those bare (avatar-less tiles that still open the channel) rather than showing an empty screen. Ids are collected in deterministic order.</td></tr>
+  <tr><td><code>VideoItem.ChannelId</code></td><td>New nullable field: the first <code>UC…</code> browse id in the cell, as the tvOS parser reads it. Feeds the click-through and the context menu.</td></tr>
+  <tr><td>Not ported</td><td>tvOS's on-disk subscription cache (a TV-startup optimization) and its <code>ChannelAvatarService</code> — the FEchannels cells carry the avatars the grid needs.</td></tr>
+</table></div>
+
+<h2>3 · The channel page</h2>
+<div class="table-wrap"><table>
+  <tr><th>Aspect</th><th>Decision</th></tr>
+  <tr><td>Header</td><td>Banner (when present) drawn behind; avatar 64 px circle, channel name, and the subscribe toggle on one line beneath it.</td></tr>
+  <tr><td>Subscribe toggle</td><td>One button: "Subscribe" (outline) ↔ "Subscribed ✓" (filled). Toggles optimistically and rolls back with the error surfaced in the page's InfoBar if the call fails. Hidden while <code>IsSubscribed</code> is unknown.</td></tr>
+  <tr><td>Rows</td><td>The channel's shelves rendered exactly as Home rows: VideoCard rows, ShortCard rows, sideways paging. First page of shelves only — no "Load more" (the tvOS scope choice).</td></tr>
+  <tr><td>Navigation</td><td><code>Frame.Navigate(ChannelPage, channelId + fallback title)</code>. The fallback title from the originating card shows until the header arrives. Channel pages can open further channel pages; system back walks the stack.</td></tr>
+  <tr><td>Empty/error</td><td>Load failure: InfoBar with Retry, as every other page. A channel with no shelves says so in one quiet line.</td></tr>
+</table></div>
+
+<h2>4 · The Subscriptions screen</h2>
+<ul>
+  <li>New <b>Subscriptions</b> item in the NavigationView, between Search and History.</li>
+  <li>A wrapping grid of the followed channels: 96 px round avatar with the name beneath,
+  in the order FEchannels returned them (YouTube's own order — no local sorting). Click opens
+  the channel page.</li>
+  <li>Loaded on first visit, refreshed on every navigation to the page; no disk cache.</li>
+</ul>
+
+<h2>5 · Ways into a channel</h2>
+<div class="table-wrap"><table>
+  <tr><th>Entry</th><th>Behavior</th></tr>
+  <tr><td>Channel name on a card</td><td>The subtitle's channel-name segment becomes a link (hover underline). Click opens the channel instead of the video.</td></tr>
+  <tr><td>Right-click a card</td><td>Context menu with <i>Go to channel</i> — the mouse idiom for tvOS's long-press menu. Shown only when the cell carried a <code>ChannelId</code>.</td></tr>
+  <tr><td>Player title bar</td><td>The channel name shown with the playing video becomes the same link.</td></tr>
+  <tr><td>Subscriptions grid</td><td>Every tile, as above.</td></tr>
+</table></div>
+
+<h2>6 · Testing</h2>
+<ul>
+  <li>Core tests against synthetic JSON, as all stages: composite merge order (lead / subscriptions
+  / trailing / history), silent supplementary failure, subscriptions-feed folding + retitle,
+  channel header parse (present and absent banner/button), FEchannels parse with the bare-id
+  fallback, subscribe/unsubscribe request shape, <code>ChannelId</code> extraction.</li>
+  <li>UI verified by Claude via app launch + screenshots (composite Home order, channel page,
+  grid); subscribe/unsubscribe exercised against a real channel and confirmed on another device.</li>
+</ul>
+
+<h2>7 · Deliberately out</h2>
+<ul>
+  <li>Channel search, channel tabs (Videos/Playlists/About) — the TV response's shelves are the page.</li>
+  <li>Notifications/bell state — not in tvOS either.</li>
+  <li>Disk-cached subscription list and avatar lookup service — fetch on demand.</li>
+</ul>
+</main>
