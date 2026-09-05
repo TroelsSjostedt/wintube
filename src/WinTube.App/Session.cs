@@ -31,6 +31,7 @@ public sealed class Session
     public StreamService Streams { get; }
     public VideoMetadataService Metadata { get; }
     public SponsorBlockService SponsorBlock { get; }
+    public CommentService Comments { get; }
     public WatchProgressStore Progress { get; } = new(DataDirectory);
     public PlayerSettingsStore PlayerSettings { get; } = new(DataDirectory);
     public WatchHistoryStore History { get; } = new(DataDirectory);
@@ -56,6 +57,7 @@ public sealed class Session
         Streams = new StreamService(InnerTube, visitorData);
         Metadata = new VideoMetadataService(InnerTube, visitorData);
         SponsorBlock = new SponsorBlockService(http);
+        Comments = new CommentService(InnerTube);
 
         var appwrite = AppwriteConfig.FromSecrets(secrets);
         if (appwrite is not null)

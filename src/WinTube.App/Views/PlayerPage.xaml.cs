@@ -1,7 +1,10 @@
+using System.Collections.ObjectModel;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Media.Core;
@@ -44,6 +47,16 @@ public sealed partial class PlayerPage : Page
     private DispatcherQueueTimer? sponsorTimer;
     private DispatcherQueueTimer? toastTimer;
 
+    // MARK: comments
+    private readonly ObservableCollection<CommentRowViewModel> commentRows = [];
+    private List<CommentItem> topLevelComments = [];
+    private string? topLevelContinuation;
+    private bool commentsLoaded;
+    private CommentItem? repliesParent;
+    private List<CommentItem> repliesComments = [];
+    private string? repliesContinuation;
+    private CancellationTokenSource? commentsCts;
+
     public PlayerPage() => InitializeComponent();
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -61,6 +74,8 @@ public sealed partial class PlayerPage : Page
         leftPage = false;
         retried = false;
         _ = StartAsync(after: null);
+
+        ResetComments();
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
@@ -75,6 +90,9 @@ public sealed partial class PlayerPage : Page
         toastTimer?.Stop();
         sponsorSegments = [];
         sponsorSkipped.Clear();
+
+        commentsCts?.Cancel();
+        commentsCts = null;
     }
 
     // MARK: resolve + play
@@ -462,4 +480,246 @@ public sealed partial class PlayerPage : Page
         Clipboard.SetContent(package);
         ShowSkipToast("Link copied");
     }
+
+    // MARK: comments
+    //
+    // Unauthenticated reads (no Bearer, no 401-retry) — called directly on App.Session.Comments
+    // rather than through Session.RunAsync. Every path here is fully try/caught: a comments
+    // failure must never surface as, or be confused with, a playback failure.
+
+    /// A fresh video always starts with the panel closed and every cache cleared, so a prior
+    /// video's comments never flash before the new load replaces them.
+    private void ResetComments()
+    {
+        commentsCts?.Cancel();
+        commentsCts = null;
+        commentsLoaded = false;
+        commentRows.Clear();
+        topLevelComments = [];
+        topLevelContinuation = null;
+        repliesParent = null;
+        repliesComments = [];
+        repliesContinuation = null;
+        PanelTitle.Text = "COMMENTS";
+        RepliesBackButton.Visibility = Visibility.Collapsed;
+        CommentsList.Visibility = Visibility.Visible;
+        CommentsStatus.Visibility = Visibility.Collapsed;
+        CommentsRetry.Visibility = Visibility.Collapsed;
+        CommentsPanel.Visibility = Visibility.Collapsed;
+        CommentsButton.IsChecked = false;
+    }
+
+    private void OnToggleComments(object sender, RoutedEventArgs e)
+    {
+        if (CommentsPanel.Visibility == Visibility.Visible)
+        {
+            CommentsPanel.Visibility = Visibility.Collapsed;
+            CommentsButton.IsChecked = false;
+            return;
+        }
+
+        CommentsPanel.Visibility = Visibility.Visible;
+        CommentsButton.IsChecked = true;
+        if (commentsLoaded) return;
+        commentsLoaded = true;
+        _ = LoadTopLevelAsync();
+    }
+
+    /// A tap that lands inside the panel (including empty space below the list) must never
+    /// bubble to OnPlayerTapped and toggle playback.
+    private void OnCommentsPanelTapped(object sender, TappedRoutedEventArgs e) => e.Handled = true;
+
+    private async Task LoadTopLevelAsync()
+    {
+        ShowCommentsStatus("Loading…");
+        commentsCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        commentsCts = cts;
+        try
+        {
+            var page = await App.Session.Comments.TopLevelAsync(video!.Id, cts.Token);
+            if (leftPage || cts.IsCancellationRequested) return;
+            topLevelComments = page.Comments.ToList();
+            topLevelContinuation = page.Continuation;
+            if (topLevelComments.Count == 0)
+            {
+                ShowCommentsStatus("No comments yet.");
+                return;
+            }
+            HideCommentsStatus();
+            RenderTopLevel();
+        }
+        catch (CommentsUnavailableException)
+        {
+            if (leftPage) return;
+            ShowCommentsStatus("Comments aren't available for this video.");
+        }
+        catch (Exception ex)
+        {
+            if (leftPage || cts.IsCancellationRequested) return;
+            ShowCommentsStatus(ex.Message, showRetry: true);
+        }
+    }
+
+    private void OnCommentsRetry(object sender, RoutedEventArgs e) => _ = LoadTopLevelAsync();
+
+    private async void OnCommentClicked(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is not CommentRowViewModel row || row.IsPinnedParent) return;
+        try
+        {
+            if (row.IsLoadMore) await LoadMoreAsync();
+            else if (row.Comment is { HasReplies: true } comment) await OpenRepliesAsync(comment);
+        }
+        catch (Exception)
+        {
+            // A load-more/replies fetch failing leaves the panel showing whatever it already
+            // had — never lets a comments hiccup touch playback or crash the page.
+        }
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        var ct = commentsCts?.Token ?? default;
+        if (repliesParent is not null)
+        {
+            if (repliesContinuation is not { } token) return;
+            var page = await App.Session.Comments.PageAsync(token, ct);
+            if (leftPage) return;
+            repliesComments = [.. repliesComments, .. page.Comments];
+            repliesContinuation = page.Continuation;
+            RenderReplies();
+        }
+        else
+        {
+            if (topLevelContinuation is not { } token) return;
+            var page = await App.Session.Comments.PageAsync(token, ct);
+            if (leftPage) return;
+            topLevelComments = [.. topLevelComments, .. page.Comments];
+            topLevelContinuation = page.Continuation;
+            RenderTopLevel();
+        }
+    }
+
+    private async Task OpenRepliesAsync(CommentItem comment)
+    {
+        var page = await App.Session.Comments.PageAsync(comment.RepliesToken!, commentsCts?.Token ?? default);
+        if (leftPage) return;
+        repliesParent = comment;
+        repliesComments = page.Comments.ToList();
+        repliesContinuation = page.Continuation;
+        PanelTitle.Text = "REPLIES";
+        RepliesBackButton.Visibility = Visibility.Visible;
+        RenderReplies();
+    }
+
+    private void OnRepliesBack(object sender, RoutedEventArgs e) => CloseReplies();
+
+    /// Restores the cached top-level rows rather than re-fetching — matches tvOS and keeps
+    /// "back" instant.
+    private void CloseReplies()
+    {
+        repliesParent = null;
+        repliesComments = [];
+        repliesContinuation = null;
+        PanelTitle.Text = "COMMENTS";
+        RepliesBackButton.Visibility = Visibility.Collapsed;
+        RenderTopLevel();
+    }
+
+    private void RenderTopLevel()
+    {
+        commentRows.Clear();
+        foreach (var comment in topLevelComments) commentRows.Add(new CommentRowViewModel(comment));
+        if (topLevelContinuation is not null)
+            commentRows.Add(CommentRowViewModel.LoadMore("Load more comments"));
+    }
+
+    private void RenderReplies()
+    {
+        commentRows.Clear();
+        commentRows.Add(new CommentRowViewModel(repliesParent!, isPinnedParent: true));
+        foreach (var reply in repliesComments) commentRows.Add(new CommentRowViewModel(reply));
+        if (repliesContinuation is not null)
+            commentRows.Add(CommentRowViewModel.LoadMore("Show more replies"));
+    }
+
+    private void ShowCommentsStatus(string message, bool showRetry = false)
+    {
+        CommentsList.Visibility = Visibility.Collapsed;
+        CommentsStatus.Text = message;
+        CommentsStatus.Visibility = Visibility.Visible;
+        CommentsRetry.Visibility = showRetry ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void HideCommentsStatus()
+    {
+        CommentsStatus.Visibility = Visibility.Collapsed;
+        CommentsRetry.Visibility = Visibility.Collapsed;
+        CommentsList.Visibility = Visibility.Visible;
+    }
+
+    /// Esc walks the panel back one level at a time: out of a replies view first, then closes
+    /// the panel entirely — matching tvOS. Wired to both PreviewKeyDown (seen regardless of
+    /// which child has focus) and KeyDown (belt-and-suspenders for focus landing on the page
+    /// itself); marking the preview pass handled suppresses the later bubbling KeyDown.
+    private void OnKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != Windows.System.VirtualKey.Escape || CommentsPanel.Visibility != Visibility.Visible) return;
+        e.Handled = true;
+        if (repliesParent is not null) CloseReplies();
+        else
+        {
+            CommentsPanel.Visibility = Visibility.Collapsed;
+            CommentsButton.IsChecked = false;
+        }
+    }
+}
+
+/// Mutable per-row state for one comments-panel entry: a normal comment/reply row, the pinned
+/// parent shown atop a replies view, or a "load more" row. Immutable CommentItem carries the
+/// data; this wraps it with the display strings and brushes the row's DataTemplate binds to —
+/// same split as VideoCardViewModel/SubscriptionItemViewModel elsewhere in this file's siblings.
+public sealed class CommentRowViewModel
+{
+    private static readonly Brush FallbackAvatarFill =
+        (Brush)Application.Current.Resources["ControlFillColorSecondaryBrush"];
+
+    public CommentItem? Comment { get; }
+    public bool IsPinnedParent { get; }
+    public bool IsLoadMore { get; }
+    public bool HasReplies => Comment?.HasReplies ?? false;
+
+    public string TimeAndAuthorLine { get; } = "";
+    public string Text { get; } = "";
+    public string MetaLine { get; } = "";
+    public string LoadMoreText { get; } = "";
+    public Brush AvatarFill { get; } = FallbackAvatarFill;
+
+    public Visibility CommentVisibility => IsLoadMore ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility LoadMoreVisibility => IsLoadMore ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ChevronVisibility => HasReplies ? Visibility.Visible : Visibility.Collapsed;
+    public Thickness PinnedBorderThickness => IsPinnedParent ? new Thickness(0, 0, 0, 1) : default;
+
+    public CommentRowViewModel(CommentItem comment, bool isPinnedParent = false)
+    {
+        Comment = comment;
+        IsPinnedParent = isPinnedParent;
+        TimeAndAuthorLine = $"@{comment.Author} · {comment.PublishedTime}";
+        Text = comment.Text;
+        MetaLine = comment.ReplyCount.Length > 0
+            ? $"{comment.LikeCount} likes · {comment.ReplyCount} replies"
+            : $"{comment.LikeCount} likes";
+        AvatarFill = comment.AvatarUrl is { } avatarUrl
+            ? new ImageBrush { ImageSource = new BitmapImage(new Uri(avatarUrl)), Stretch = Stretch.UniformToFill }
+            : FallbackAvatarFill;
+    }
+
+    private CommentRowViewModel(string loadMoreText)
+    {
+        IsLoadMore = true;
+        LoadMoreText = loadMoreText;
+    }
+
+    public static CommentRowViewModel LoadMore(string text) => new(text);
 }

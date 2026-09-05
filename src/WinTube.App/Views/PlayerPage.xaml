@@ -1,7 +1,9 @@
 <Page
     x:Class="WinTube.App.Views.PlayerPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:WinTube.App.Views"
+    KeyDown="OnKeyDown" PreviewKeyDown="OnKeyDown">
     <Grid RowDefinitions="Auto,*" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid Grid.Row="0" Padding="12,8" ColumnDefinitions="Auto,*,Auto">
             <Button x:Name="BackButton" Grid.Column="0" Content="Back" Click="OnBack"/>
@@ -14,17 +16,25 @@
                            PointerEntered="OnAuthorEntered" PointerExited="OnAuthorExited"
                            Tapped="OnAuthorTapped"/>
             </StackPanel>
-            <SplitButton x:Name="CopyLinkButton" Grid.Column="2" Click="OnCopyLink" VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <FontIcon Glyph="&#xE71B;" FontSize="14"/>
-                    <TextBlock Text="Copy link"/>
-                </StackPanel>
-                <SplitButton.Flyout>
-                    <MenuFlyout Opening="OnCopyFlyoutOpening">
-                        <MenuFlyoutItem x:Name="CopyLinkAtItem" Click="OnCopyLinkAt"/>
-                    </MenuFlyout>
-                </SplitButton.Flyout>
-            </SplitButton>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                <ToggleButton x:Name="CommentsButton" Click="OnToggleComments" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE90A;" FontSize="14"/>
+                        <TextBlock Text="Comments"/>
+                    </StackPanel>
+                </ToggleButton>
+                <SplitButton x:Name="CopyLinkButton" Click="OnCopyLink" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE71B;" FontSize="14"/>
+                        <TextBlock Text="Copy link"/>
+                    </StackPanel>
+                    <SplitButton.Flyout>
+                        <MenuFlyout Opening="OnCopyFlyoutOpening">
+                            <MenuFlyoutItem x:Name="CopyLinkAtItem" Click="OnCopyLinkAt"/>
+                        </MenuFlyout>
+                    </SplitButton.Flyout>
+                </SplitButton>
+            </StackPanel>
         </Grid>
 
         <Grid Grid.Row="1">
@@ -48,6 +58,59 @@
                            HorizontalAlignment="Center"/>
                 <Button Content="Back" Click="OnBack" HorizontalAlignment="Center"/>
             </StackPanel>
+
+            <Grid x:Name="CommentsPanel" Width="400" HorizontalAlignment="Right"
+                  Visibility="Collapsed" Background="#D9141414" Tapped="OnCommentsPanelTapped">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Padding="16,12" ColumnDefinitions="Auto,*,Auto">
+                    <Button x:Name="RepliesBackButton" Grid.Column="0" Content="&#xE72B;"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                            Visibility="Collapsed" Click="OnRepliesBack" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="PanelTitle" Grid.Column="1" Text="COMMENTS"
+                               VerticalAlignment="Center" CharacterSpacing="60" FontSize="13"/>
+                    <Button Grid.Column="2" Content="&#xE711;"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}" Click="OnToggleComments"/>
+                </Grid>
+                <ListView x:Name="CommentsList" Grid.Row="1" SelectionMode="None"
+                          IsItemClickEnabled="True" ItemClick="OnCommentClicked"
+                          ItemsSource="{x:Bind commentRows}">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:CommentRowViewModel">
+                            <Grid>
+                                <TextBlock Text="{x:Bind LoadMoreText}" Visibility="{x:Bind LoadMoreVisibility}"
+                                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                           HorizontalAlignment="Center" Margin="0,14"/>
+                                <Grid Visibility="{x:Bind CommentVisibility}" Padding="16,12"
+                                      BorderThickness="{x:Bind PinnedBorderThickness}"
+                                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                      ColumnDefinitions="Auto,*">
+                                    <Ellipse Grid.Column="0" Width="32" Height="32" VerticalAlignment="Top"
+                                             Fill="{x:Bind AvatarFill}"/>
+                                    <StackPanel Grid.Column="1" Margin="12,0,0,0" Spacing="2">
+                                        <TextBlock Text="{x:Bind TimeAndAuthorLine}" FontSize="12"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                        <TextBlock Text="{x:Bind Text}" FontSize="14" TextWrapping="Wrap"/>
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <TextBlock Text="{x:Bind MetaLine}" FontSize="12"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                            <FontIcon Glyph="&#xE76C;" FontSize="10"
+                                                      Visibility="{x:Bind ChevronVisibility}"
+                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+                <TextBlock x:Name="CommentsStatus" Grid.Row="1" Margin="16" TextWrapping="Wrap"
+                           Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                <Button x:Name="CommentsRetry" Grid.Row="1" Content="Retry" VerticalAlignment="Center"
+                        HorizontalAlignment="Center" Visibility="Collapsed" Click="OnCommentsRetry"/>
+            </Grid>
         </Grid>
     </Grid>
 </Page>
