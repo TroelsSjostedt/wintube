@@ -56,6 +56,8 @@ public sealed partial class PlayerPage : Page
     private List<CommentItem> repliesComments = [];
     private string? repliesContinuation;
     private CancellationTokenSource? commentsCts;
+    private bool commentsPaging;
+    private double topLevelScrollOffset;
 
     public PlayerPage() => InitializeComponent();
 
@@ -92,6 +94,7 @@ public sealed partial class PlayerPage : Page
         sponsorSkipped.Clear();
 
         commentsCts?.Cancel();
+        commentsCts?.Dispose();
         commentsCts = null;
     }
 
@@ -492,6 +495,7 @@ public sealed partial class PlayerPage : Page
     private void ResetComments()
     {
         commentsCts?.Cancel();
+        commentsCts?.Dispose();
         commentsCts = null;
         commentsLoaded = false;
         commentRows.Clear();
@@ -554,18 +558,23 @@ public sealed partial class PlayerPage : Page
             if (leftPage) return;
             ShowCommentsStatus("Comments aren't available for this video.");
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             if (leftPage || cts.IsCancellationRequested) return;
-            ShowCommentsStatus(ex.Message, showRetry: true);
+            ShowCommentsStatus("Comments couldn't be loaded.", showRetry: true);
         }
     }
 
     private void OnCommentsRetry(object sender, RoutedEventArgs e) => _ = LoadTopLevelAsync();
 
+    /// A click can only ever start one paging/drill-down fetch at a time — commentsPaging is
+    /// checked-and-set here (covering both Load More and drill-down) so a double-click never
+    /// fires the same continuation twice and appends its page twice.
     private async void OnCommentClicked(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not CommentRowViewModel row || row.IsPinnedParent) return;
+        if (commentsPaging) return;
+        commentsPaging = true;
         try
         {
             if (row.IsLoadMore) await LoadMoreAsync();
@@ -575,6 +584,10 @@ public sealed partial class PlayerPage : Page
         {
             // A load-more/replies fetch failing leaves the panel showing whatever it already
             // had — never lets a comments hiccup touch playback or crash the page.
+        }
+        finally
+        {
+            commentsPaging = false;
         }
     }
 
@@ -588,7 +601,7 @@ public sealed partial class PlayerPage : Page
             if (leftPage) return;
             repliesComments = [.. repliesComments, .. page.Comments];
             repliesContinuation = page.Continuation;
-            RenderReplies();
+            AppendCommentRows(page.Comments, repliesContinuation, "Show more replies");
         }
         else
         {
@@ -597,12 +610,26 @@ public sealed partial class PlayerPage : Page
             if (leftPage) return;
             topLevelComments = [.. topLevelComments, .. page.Comments];
             topLevelContinuation = page.Continuation;
-            RenderTopLevel();
+            AppendCommentRows(page.Comments, topLevelContinuation, "Load more");
         }
+    }
+
+    /// Appends a fetched page's rows in place — dropping the old trailing load-more row (if
+    /// any) and adding a fresh one only while a continuation remains — rather than clearing and
+    /// rebuilding, so the ListView's scroll position never jumps back to the top mid-page.
+    private void AppendCommentRows(IReadOnlyList<CommentItem> newItems, string? continuation, string loadMoreText)
+    {
+        if (commentRows.Count > 0 && commentRows[^1].IsLoadMore)
+            commentRows.RemoveAt(commentRows.Count - 1);
+        foreach (var item in newItems) commentRows.Add(new CommentRowViewModel(item));
+        if (continuation is not null) commentRows.Add(CommentRowViewModel.LoadMore(loadMoreText));
     }
 
     private async Task OpenRepliesAsync(CommentItem comment)
     {
+        // Captured before the fetch so "back" can restore exactly where the top-level list was
+        // scrolled to when the drill-down happened.
+        topLevelScrollOffset = FindScrollViewer(CommentsList)?.VerticalOffset ?? 0;
         var page = await App.Session.Comments.PageAsync(comment.RepliesToken!, commentsCts?.Token ?? default);
         if (leftPage) return;
         repliesParent = comment;
@@ -616,7 +643,9 @@ public sealed partial class PlayerPage : Page
     private void OnRepliesBack(object sender, RoutedEventArgs e) => CloseReplies();
 
     /// Restores the cached top-level rows rather than re-fetching — matches tvOS and keeps
-    /// "back" instant.
+    /// "back" instant. The rebuild resets ListView scroll to the top, so the offset captured on
+    /// the way into replies is restored after the fact, once layout has caught up with the new
+    /// items (TryEnqueue runs after the current render pass).
     private void CloseReplies()
     {
         repliesParent = null;
@@ -625,6 +654,9 @@ public sealed partial class PlayerPage : Page
         PanelTitle.Text = "COMMENTS";
         RepliesBackButton.Visibility = Visibility.Collapsed;
         RenderTopLevel();
+
+        var offset = topLevelScrollOffset;
+        dispatcher.TryEnqueue(() => FindScrollViewer(CommentsList)?.ChangeView(null, offset, null, true));
     }
 
     private void RenderTopLevel()
@@ -642,6 +674,17 @@ public sealed partial class PlayerPage : Page
         foreach (var reply in repliesComments) commentRows.Add(new CommentRowViewModel(reply));
         if (repliesContinuation is not null)
             commentRows.Add(CommentRowViewModel.LoadMore("Show more replies"));
+    }
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is ScrollViewer scrollViewer) return scrollViewer;
+            if (FindScrollViewer(child) is { } found) return found;
+        }
+        return null;
     }
 
     private void ShowCommentsStatus(string message, bool showRetry = false)
@@ -698,18 +741,19 @@ public sealed class CommentRowViewModel
 
     public Visibility CommentVisibility => IsLoadMore ? Visibility.Collapsed : Visibility.Visible;
     public Visibility LoadMoreVisibility => IsLoadMore ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility ChevronVisibility => HasReplies ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ChevronVisibility =>
+        HasReplies && !IsPinnedParent ? Visibility.Visible : Visibility.Collapsed;
     public Thickness PinnedBorderThickness => IsPinnedParent ? new Thickness(0, 0, 0, 1) : default;
 
     public CommentRowViewModel(CommentItem comment, bool isPinnedParent = false)
     {
         Comment = comment;
         IsPinnedParent = isPinnedParent;
-        TimeAndAuthorLine = $"@{comment.Author} · {comment.PublishedTime}";
+        TimeAndAuthorLine = $"{comment.Author} · {comment.PublishedTime}";
         Text = comment.Text;
         MetaLine = comment.ReplyCount.Length > 0
-            ? $"{comment.LikeCount} likes · {comment.ReplyCount} replies"
-            : $"{comment.LikeCount} likes";
+            ? $"👍 {comment.LikeCount} · {comment.ReplyCount} replies"
+            : $"👍 {comment.LikeCount}";
         AvatarFill = comment.AvatarUrl is { } avatarUrl
             ? new ImageBrush { ImageSource = new BitmapImage(new Uri(avatarUrl)), Stretch = Stretch.UniformToFill }
             : FallbackAvatarFill;
