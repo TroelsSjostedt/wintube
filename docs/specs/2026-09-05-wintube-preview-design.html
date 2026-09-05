@@ -96,8 +96,12 @@
 
 <h2>3 · Cost control</h2>
 <ul>
-  <li>Each preview is a full <code>StreamService.ResolveAsync</code> — the 0.7 s dwell means a
-  pointer sweeping a row costs nothing.</li>
+  <li>Each preview is a <code>StreamService.ResolveAsync</code> with <code>after: VisionOs</code>
+  — straight to the ANDROID rung's muxed 360p MP4. <i>(Amended during implementation: the
+  VISIONOS HLS manifest routinely refuses to open in a bare MediaPlayer — SourceNotSupported
+  or a permanent hang in Opening — which the real player survives only via its retry ladder;
+  and 360p progressive is the right weight for a 320 px tile anyway.)</i> The 0.7 s dwell
+  means a pointer sweeping a row costs nothing.</li>
   <li>One at a time, preemption cancels the loser's resolution; a stale resolution completing
   after preemption is discarded (token checked before play).</li>
 </ul>
