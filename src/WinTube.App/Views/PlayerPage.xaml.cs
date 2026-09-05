@@ -632,7 +632,7 @@ public sealed partial class PlayerPage : Page
         commentRows.Clear();
         foreach (var comment in topLevelComments) commentRows.Add(new CommentRowViewModel(comment));
         if (topLevelContinuation is not null)
-            commentRows.Add(CommentRowViewModel.LoadMore("Load more comments"));
+            commentRows.Add(CommentRowViewModel.LoadMore("Load more"));
     }
 
     private void RenderReplies()
