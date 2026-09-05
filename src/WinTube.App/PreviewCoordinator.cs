@@ -43,6 +43,7 @@ public sealed class PreviewCoordinator
             owner.HidePreview();
             StopPlayer();
             gate.Cold(id);
+            gate.Warm(id, DateTimeOffset.UtcNow);
         }
         else
         {
