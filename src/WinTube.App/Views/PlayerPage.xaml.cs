@@ -133,8 +133,10 @@ public sealed partial class PlayerPage : Page
         mediaPlayer.PlaybackSession.PlaybackStateChanged += OnPlaybackStateChanged;
         mediaPlayer.Source = playbackItem;
 
+        // Not attached to the element yet: a failed ladder attempt would otherwise flash the
+        // transport controls' built-in "video type not supported" while the retry is already
+        // under way. OnMediaOpened attaches the player once there is real media to show.
         player = mediaPlayer;
-        Player.SetMediaPlayer(mediaPlayer);
 
         stallTimer = dispatcher.CreateTimer();
         stallTimer.Interval = TimeSpan.FromSeconds(10);
@@ -169,6 +171,9 @@ public sealed partial class PlayerPage : Page
     private void OnMediaOpened(MediaPlayer sender, object args) => dispatcher.TryEnqueue(() =>
     {
         if (leftPage || player != sender) return;
+
+        Player.SetMediaPlayer(sender);
+        FixVolumeButtonTooltip();
 
         var resumeSeconds = startAt?.TotalSeconds ?? App.Session.Progress.ResumePosition(video!.Id);
         if (resumeSeconds is { } resume)
@@ -381,6 +386,26 @@ public sealed partial class PlayerPage : Page
         timer.IsRepeating = false;
         timer.Tick += (_, _) => App.Session.PlayerSettings.SaveVolume(pendingVolume);
         return timer;
+    }
+
+    /// The transport controls label their volume button with the platform's "Mute" tooltip,
+    /// but clicking it opens the volume flyout — the actual mute button lives inside that
+    /// flyout. Relabel it once the template exists (idempotent; runs on every media open).
+    private void FixVolumeButtonTooltip()
+    {
+        if (FindDescendant(Player, "VolumeMuteButton") is { } volumeButton)
+            ToolTipService.SetToolTip(volumeButton, "Volume");
+    }
+
+    private static DependencyObject? FindDescendant(DependencyObject root, string name)
+    {
+        for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is FrameworkElement { } element && element.Name == name) return child;
+            if (FindDescendant(child, name) is { } found) return found;
+        }
+        return null;
     }
 
     /// Clicking the video surface toggles play/pause. Tapped bubbles up from the transport
