@@ -1,6 +1,7 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -122,7 +123,7 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
 
     // MARK: hover/focus preview (IPreviewHost)
 
-    private ListViewItem? listViewItem;
+    private SelectorItem? selectorItem;
     private MediaPlayer? previewPlayer;
 
     string IPreviewHost.PreviewVideoId => Video?.Id ?? "";
@@ -156,22 +157,30 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        listViewItem = FindListViewItemAncestor(this);
-        if (listViewItem is { } item)
+        // A re-Loaded without an intervening Unloaded (rare, but container reuse can do it)
+        // must not double-subscribe.
+        if (selectorItem is { } stale)
         {
-            item.GotFocus += OnListViewItemGotFocus;
-            item.LostFocus += OnListViewItemLostFocus;
+            stale.GotFocus -= OnSelectorItemGotFocus;
+            stale.LostFocus -= OnSelectorItemLostFocus;
+        }
+
+        selectorItem = FindSelectorItemAncestor(this);
+        if (selectorItem is { } item)
+        {
+            item.GotFocus += OnSelectorItemGotFocus;
+            item.LostFocus += OnSelectorItemLostFocus;
         }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
-        if (listViewItem is { } item)
+        if (selectorItem is { } item)
         {
-            item.GotFocus -= OnListViewItemGotFocus;
-            item.LostFocus -= OnListViewItemLostFocus;
+            item.GotFocus -= OnSelectorItemGotFocus;
+            item.LostFocus -= OnSelectorItemLostFocus;
         }
-        listViewItem = null;
+        selectorItem = null;
         App.Previews.Detach(this);
     }
 
@@ -179,16 +188,19 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
 
     private void OnPointerExited(object sender, PointerRoutedEventArgs e) => App.Previews.Cold(this);
 
-    private void OnListViewItemGotFocus(object sender, RoutedEventArgs e) => App.Previews.Warm(this);
+    private void OnSelectorItemGotFocus(object sender, RoutedEventArgs e) => App.Previews.Warm(this);
 
-    private void OnListViewItemLostFocus(object sender, RoutedEventArgs e) => App.Previews.Cold(this);
+    private void OnSelectorItemLostFocus(object sender, RoutedEventArgs e) => App.Previews.Cold(this);
 
-    private static ListViewItem? FindListViewItemAncestor(DependencyObject start)
+    /// GridView (SearchPage/HistoryPage) hosts cards in GridViewItem, ListView in ListViewItem —
+    /// both derive from SelectorItem, so matching that base is what makes keyboard focus wire up
+    /// in a GridView host too instead of only in a ListView one.
+    private static SelectorItem? FindSelectorItemAncestor(DependencyObject start)
     {
         for (var parent = VisualTreeHelper.GetParent(start); parent is not null;
              parent = VisualTreeHelper.GetParent(parent))
         {
-            if (parent is ListViewItem item) return item;
+            if (parent is SelectorItem item) return item;
         }
         return null;
     }
