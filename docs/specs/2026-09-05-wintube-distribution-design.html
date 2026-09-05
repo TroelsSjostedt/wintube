@@ -1,0 +1,132 @@
+<title>WinTube Distribution</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5; --ink: #24211E; --muted: #6B645C; --accent: #A63D2F;
+    --line: #E4DFD8; --card: #FFFFFF; --code-bg: #F1EDE7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+      --line: #35302B; --card: #242019; --code-bg: #262119;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+    --line: #35302B; --card: #242019; --code-bg: #262119;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: "Public Sans", "Segoe UI", system-ui, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; padding: 0 1.25rem 6rem; }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2 { font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  p { margin: .75rem 0; }
+  code, pre { font-family: "IBM Plex Mono", Consolas, monospace; font-size: .85em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: .75rem 1rem; border-radius: 8px; overflow-x: auto; }
+  .eyebrow { font-family: "Schibsted Grotesk", sans-serif; font-size: .72rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 3.5rem 0 .25rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; color: var(--muted); font-size: .85rem; margin: 1rem 0 0; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: "Schibsted Grotesk", sans-serif; font-size: .78rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: .4rem .75rem .4rem 0; }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .75rem .55rem 0; vertical-align: top; }
+  td:first-child, th:first-child { padding-left: 0; }
+  ul, ol { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Stage 9 · Approved 2026-09-05</p>
+  <h1>WinTube Distribution</h1>
+  <p>Friends install one Setup.exe from GitHub Releases and get updates automatically. Public
+  repo, Velopack packaging, embedded client constants — nothing to configure and nothing to
+  pre-install.</p>
+  <div class="meta">
+    <span><b>Repo</b> github.com/TroelsSjostedt/wintube (public, created by this stage)</span>
+    <span><b>Base</b> WinTube stages 1–8</span>
+  </div>
+</header>
+
+<h2>1 · GitHub repo</h2>
+<ul>
+  <li>Create the public repo <code>TroelsSjostedt/wintube</code> via <code>gh repo create</code>,
+  add it as <code>origin</code>, push <code>master</code>. Description from the README's first
+  line; no issues/wiki ceremony.</li>
+  <li>Pushes remain user-initiated afterwards — except release tags, which are the release
+  mechanism itself.</li>
+</ul>
+
+<h2>2 · Embedded client constants</h2>
+<ul>
+  <li><code>Secrets.Load()</code> falls back per-field to built-in defaults for the three
+  YouTube-on-TV constants (InnerTube API key, OAuth client id, OAuth client secret) when
+  <code>secrets.json</code> is absent or a field is empty. These are Google's own public
+  TV-client app constants (in every TV firmware and in yt-dlp's source) — they identify the
+  app, not a user; nothing personal is embedded.</li>
+  <li>The Appwrite fields stay file-only: sync is a personal opt-in and must not point
+  friends at anyone's server by default.</li>
+  <li><code>secrets.json</code> still overrides field-by-field. The README's setup section
+  changes from "required" to "optional overrides".</li>
+  <li>Tests: absent file → defaults; partial file → mixed; full file → file wins.</li>
+</ul>
+
+<h2>3 · Velopack in the app</h2>
+<div class="table-wrap"><table>
+  <tr><th>Aspect</th><th>Decision</th></tr>
+  <tr><td>Bootstrap</td><td>NuGet package <code>Velopack</code>; <code>VelopackApp.Build().Run()</code> as the FIRST line of <code>Main</code> (handles the install/update/uninstall hook invocations Velopack makes).</td></tr>
+  <tr><td>Update check</td><td>On every app start, in the background after the window is up: <code>UpdateManager</code> with <code>GithubSource("https://github.com/TroelsSjostedt/wintube", null, false)</code>. Not installed via Velopack (a dev run) → the manager reports as much and the check silently does nothing.</td></tr>
+  <tr><td>Flow</td><td>New version → download silently → apply on next restart. One quiet toast in the shell: "Update ready — restart for vX.Y.Z" with a Restart button (<code>ApplyUpdatesAndRestart</code>). Ignoring it is fine; the update lands on whatever launch comes next (<code>WaitExitThenApplyUpdates</code> on the pending package at exit).</td></tr>
+  <tr><td>Failures</td><td>All silent (logged to the existing debug log). An update check must never delay or break startup.</td></tr>
+</table></div>
+
+<h2>4 · CI release pipeline</h2>
+<ul>
+  <li><code>.github/workflows/release.yml</code>, triggered by pushing a tag matching
+  <code>v*</code>. Steps: checkout → .NET 8 SDK → run Core tests →
+  <code>dotnet publish src/WinTube.App -c Release -p:Platform=x64 -r win-x64 --self-contained
+  -p:WindowsAppSDKSelfContained=true</code> → <code>vpk pack</code> with
+  <code>--packVersion</code> from the tag → <code>vpk upload github</code> (creates the GitHub
+  Release with Setup.exe, the full/delta packages and releases manifest; uses the workflow's
+  own <code>GITHUB_TOKEN</code>).</li>
+  <li>Self-contained means friends need no .NET runtime and no Windows App SDK installed.</li>
+  <li>Releasing is: <code>git tag v1.0.0; git push origin v1.0.0</code>. <code>vpk</code>
+  downloads previous releases first, so deltas chain automatically.</li>
+</ul>
+
+<h2>5 · The friends' experience</h2>
+<ol>
+  <li>Open the release page, download <code>WinTube-win-Setup.exe</code>.</li>
+  <li>SmartScreen warns (no paid code signing): "More info" → "Run anyway".</li>
+  <li>Per-user install (no admin), Start-menu shortcut, app launches; sign in with the usual
+  device code. <code>wintube://</code> registers itself on first run as today.</li>
+  <li>Updates arrive by themselves at later launches.</li>
+</ol>
+<ul>
+  <li>README gains an <b>Install</b> section saying exactly this, above the build-from-source
+  section.</li>
+</ul>
+
+<h2>6 · Notes and edges</h2>
+<ul>
+  <li>The dev copy and an installed copy share <code>%LOCALAPPDATA%\WinTube</code> (tokens,
+  progress, settings) — deliberate and convenient on the dev machine.</li>
+  <li>Version stamping: the tag is the single source; the assembly picks it up via vpk, and
+  no csproj version needs manual bumping.</li>
+  <li>Rollback story: friends can install any older Setup.exe from a previous release.</li>
+  <li>Out of scope: code signing, winget, ARM64, a "check for updates" menu item, crash
+  reporting.</li>
+</ul>
+
+<h2>7 · Testing</h2>
+<ul>
+  <li>Core: the Secrets fallback/override matrix.</li>
+  <li>Local smoke: <code>vpk pack</code> on this machine and a Setup.exe install/launch on
+  this machine (shares the data dir — expected), verified by Claude.</li>
+  <li>End-to-end: tag <code>v0.9.0</code> → CI produces the release → install from GitHub →
+  then tag <code>v0.9.1</code> and watch the installed copy self-update.</li>
+</ul>
+</main>
