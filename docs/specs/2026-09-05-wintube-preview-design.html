@@ -1,0 +1,128 @@
+<title>WinTube Preview</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5; --ink: #24211E; --muted: #6B645C; --accent: #A63D2F;
+    --line: #E4DFD8; --card: #FFFFFF; --code-bg: #F1EDE7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+      --line: #35302B; --card: #242019; --code-bg: #262119;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+    --line: #35302B; --card: #242019; --code-bg: #262119;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: "Public Sans", "Segoe UI", system-ui, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; padding: 0 1.25rem 6rem; }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2 { font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  p { margin: .75rem 0; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; font-family: "IBM Plex Mono", Consolas, monospace; font-size: .85em; }
+  .eyebrow { font-family: "Schibsted Grotesk", sans-serif; font-size: .72rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 3.5rem 0 .25rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; color: var(--muted); font-size: .85rem; margin: 1rem 0 0; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: "Schibsted Grotesk", sans-serif; font-size: .78rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: .4rem .75rem .4rem 0; }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .75rem .55rem 0; vertical-align: top; }
+  td:first-child, th:first-child { padding-left: 0; }
+  ul { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+  svg { max-width: 100%; height: auto; display: block; margin: 1.25rem 0; }
+  svg text { font-family: "Public Sans", "Segoe UI", system-ui, sans-serif; fill: var(--ink); }
+  svg .m { fill: var(--muted); }
+  svg .a { fill: var(--accent); }
+  svg .box { fill: var(--card); stroke: var(--line); }
+  svg .arrow { stroke: var(--muted); fill: none; marker-end: url(#tip); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Stage 7 · Approved 2026-09-05</p>
+  <h1>WinTube Preview</h1>
+  <p>A card the pointer rests on — or keyboard focus lands on — plays its video silently in
+  place of the thumbnail, exactly as a focused tvOS card does. Nothing is recorded, nothing is
+  remembered; leaving the card puts the thumbnail back.</p>
+  <div class="meta">
+    <span><b>tvOS arbiter</b> YouTubeTV/Sources/UI/VideoPreview.swift</span>
+    <span><b>Base</b> WinTube stages 1–6</span>
+  </div>
+</header>
+
+<h2>1 · Trigger and lifetime</h2>
+<svg viewBox="0 0 700 150" role="img" aria-label="Preview lifetime timeline">
+  <defs><marker id="tip" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" opacity=".55"/></marker></defs>
+  <line x1="30" y1="60" x2="690" y2="60" class="arrow"/>
+  <circle cx="60" cy="60" r="5" class="a"/>
+  <text x="60" y="40" text-anchor="middle" font-size="13">warm</text>
+  <text x="60" y="90" text-anchor="middle" font-size="11" class="m">hover / focus</text>
+  <circle cx="220" cy="60" r="5" class="a"/>
+  <text x="220" y="40" text-anchor="middle" font-size="13">+0.7 s</text>
+  <text x="220" y="90" text-anchor="middle" font-size="11" class="m">resolve starts</text>
+  <circle cx="420" cy="60" r="5" class="a"/>
+  <text x="420" y="40" text-anchor="middle" font-size="13">first frame</text>
+  <text x="420" y="90" text-anchor="middle" font-size="11" class="m">0.2 s fade over thumbnail</text>
+  <circle cx="620" cy="60" r="5" class="a"/>
+  <text x="620" y="40" text-anchor="middle" font-size="13">cold</text>
+  <text x="620" y="90" text-anchor="middle" font-size="11" class="m">tear down, thumbnail back</text>
+</svg>
+<ul>
+  <li><b>Warm</b> = pointer enters the card, or the card's list item takes keyboard focus
+  (Tab / arrow keys). <b>Cold</b> = pointer leaves / focus moves on.</li>
+  <li>A shared <b><code>PreviewCoordinator</code></b> owns at most ONE active preview. 0.7 s
+  after warm it starts the stream resolution; cold before then just cancels the timer; cold
+  mid-resolution cancels via the CancellationToken; cold during playback tears down. A new
+  card going warm preempts the old preview immediately.</li>
+  <li>The coordinator's decision logic lives in Core, UI-free, with injected time
+  (<code>PreviewGate</code>: warm/cold/preempt in, "start resolving id X" / "stop" out) so
+  the delay, cancellation and one-at-a-time rules are unit-testable.</li>
+</ul>
+
+<h2>2 · The surface (from VideoPreview.swift)</h2>
+<div class="table-wrap"><table>
+  <tr><th>Aspect</th><th>Decision</th></tr>
+  <tr><td>Element</td><td>A second <code>MediaPlayerElement</code> in the card, no transport controls, stretched like the thumbnail (<code>UniformToFill</code> semantics — same box, so the cross-fade doesn't shift the image).</td></tr>
+  <tr><td>Reveal</td><td>Opacity 0 until the first frame is ready, then a 0.2 s ease-in fade over the thumbnail. The thumbnail never flashes black while resolving.</td></tr>
+  <tr><td>Sound &amp; state</td><td>Muted always. No watch progress written, no history recorded, no SponsorBlock, no screen-keep-awake. Starts from the top at normal speed; opening the video afterwards still resumes from real progress.</td></tr>
+  <tr><td>Volume</td><td>Unaffected by and not affecting the remembered player volume.</td></tr>
+  <tr><td>Failure</td><td>Silent: a resolution or playback failure leaves the thumbnail standing. No error UI, no retry ladder beyond what <code>StreamService.ResolveAsync</code> itself does.</td></tr>
+</table></div>
+
+<h2>3 · Cost control</h2>
+<ul>
+  <li>Each preview is a full <code>StreamService.ResolveAsync</code> — the 0.7 s dwell means a
+  pointer sweeping a row costs nothing.</li>
+  <li>One at a time, preemption cancels the loser's resolution; a stale resolution completing
+  after preemption is discarded (token checked before play).</li>
+</ul>
+
+<h2>4 · Scope</h2>
+<ul>
+  <li>Both card types: <code>VideoCard</code> (landscape, over the thumbnail area only — the
+  caption stays) and <code>ShortCard</code> (the whole portrait tile).</li>
+  <li>Every page that shows cards: Home, Search, History, channel pages, and the Shorts rows on
+  all of them. The Subscriptions grid (channel avatars) has no videos and is untouched.</li>
+  <li>The real player is untouched; a preview never survives navigation (page teardown = cold).</li>
+</ul>
+
+<h2>5 · Testing</h2>
+<ul>
+  <li>Core: <code>PreviewGate</code> tests with injected time — dwell not yet elapsed, cold
+  cancels timer, preemption stops the previous id, stale completion discarded, cold during
+  playback stops.</li>
+  <li>UI: verified by Claude via app launch + cursor placement + screenshots (fade-in on dwell,
+  thumbnail restored on leave, keyboard focus trigger via Tab/arrows).</li>
+</ul>
+
+<h2>6 · Deliberately out</h2>
+<ul>
+  <li>Sound on preview, scrubbing, duration cap — tvOS has none of these.</li>
+  <li>Prefetching neighbours' streams.</li>
+</ul>
+</main>
