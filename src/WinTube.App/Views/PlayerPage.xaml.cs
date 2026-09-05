@@ -384,15 +384,17 @@ public sealed partial class PlayerPage : Page
     }
 
     /// Clicking the video surface toggles play/pause. Tapped bubbles up from the transport
-    /// controls too (their buttons don't all mark it handled), so anything originating inside
-    /// MediaTransportControls is explicitly left alone.
+    /// controls too, and their invisible root layout spans the full frame — so instead of
+    /// fencing off the controls as a region, only a tap that actually landed on an
+    /// interactive control (a button, a slider) is left alone.
     private void OnPlayerTapped(object sender, TappedRoutedEventArgs e)
     {
         if (player is not { } p) return;
         for (var element = e.OriginalSource as DependencyObject; element is not null;
              element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element))
         {
-            if (element is MediaTransportControls) return;
+            if (element is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase
+                or Microsoft.UI.Xaml.Controls.Primitives.RangeBase) return;
         }
         if (p.PlaybackSession.PlaybackState == MediaPlaybackState.Playing) p.Pause();
         else p.Play();
