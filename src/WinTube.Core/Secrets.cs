@@ -14,11 +14,7 @@ public sealed record Secrets(string InnerTubeApiKey, string OAuthClientId, strin
     public string AppwriteHost { get; init; } = "";
     public string AppwriteProjectId { get; init; } = "";
 
-    /// Google's own public YouTube-on-TV app constants — the same values baked into every
-    /// TV firmware and printed in yt-dlp's source. They identify the app, not a user; the
-    /// per-user secrets (OAuth tokens) are DPAPI-stored and never ship. secrets.json can
-    /// still override any field, and the Appwrite fields deliberately have no defaults:
-    /// sync is a personal opt-in.
+    /// Google's public YouTube-on-TV app constants; see the class comment.
     public static Secrets Defaults { get; } = new(
         InnerTubeApiKey: "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
         OAuthClientId: "861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com",

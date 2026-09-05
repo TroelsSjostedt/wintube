@@ -35,6 +35,7 @@ public class SecretsTests : IDisposable
         Assert.Equal(Secrets.Defaults.OAuthClientId, secrets.OAuthClientId);
         Assert.Equal(Secrets.Defaults.OAuthClientSecret, secrets.OAuthClientSecret);
         Assert.Equal("my.host", secrets.AppwriteHost);
+        Assert.Equal("", secrets.AppwriteProjectId);
     }
 
     [Fact]
