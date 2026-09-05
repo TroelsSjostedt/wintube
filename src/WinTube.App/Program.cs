@@ -11,6 +11,8 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        Velopack.VelopackApp.Build().Run();
+
         WinRT.ComWrappersSupport.InitializeComWrappers();
 
         var main = AppInstance.FindOrRegisterForKey("wintube-main");

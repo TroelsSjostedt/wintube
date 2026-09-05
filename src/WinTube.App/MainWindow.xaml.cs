@@ -18,6 +18,8 @@ public sealed partial class MainWindow : Window
     /// Throttles the Activated-triggered sync so rapid focus churn doesn't hammer the backend.
     private DateTimeOffset lastSyncTrigger;
 
+    private readonly UpdateService updates = new();
+
     public MainWindow()
     {
         InitializeComponent();
@@ -34,7 +36,20 @@ public sealed partial class MainWindow : Window
         {
             RootFrame.Navigate(typeof(Views.LoginPage));
         }
+        CheckForUpdatesAsync();
     }
+
+    /// Fire-and-forget: a dev run or any failure is a silent no-op (see UpdateService), so
+    /// there's nothing to await or report on here.
+    private async void CheckForUpdatesAsync()
+    {
+        var version = await updates.CheckAsync();
+        if (version is null) return;
+        UpdateBar.Message = $"Update ready — restart for v{version}";
+        UpdateBar.IsOpen = true;
+    }
+
+    private void OnRestartForUpdate(object sender, RoutedEventArgs e) => updates.ApplyAndRestart();
 
     public Frame Frame => RootFrame;
 
