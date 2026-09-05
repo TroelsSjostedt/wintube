@@ -4,6 +4,6 @@
        app's dark tile. Rasterized to Assets/wintube.ico by scratchpad script make-icon.ps1's
        precomputed points. -->
   <rect width="96" height="96" rx="22" fill="#1B1B1F"/>
-  <polygon points="48,30 74,48 48,66" fill="#FFFFFF" transform="translate(-7 0) rotate(100 57 48)"/>
-  <polygon points="22,30 48,48 22,66" fill="#E5342B" transform="rotate(100 31 48)"/>
+  <polygon points="88.0,36.1 55.3,69.1 35.9,26.9" fill="#FFFFFF"/>
+  <polygon points="60.1,36.1 27.4,69.1 8.0,26.9" fill="#E5342B"/>
 </svg>
