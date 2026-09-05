@@ -36,6 +36,9 @@ public sealed partial class PlayerPage : Page
     private bool handledFailure;
     private bool leftPage;
 
+    private DispatcherQueueTimer? volumeSaveTimer;
+    private double pendingVolume;
+
     private IReadOnlyList<SponsorSegment> sponsorSegments = [];
     private readonly HashSet<string> sponsorSkipped = [];
     private DispatcherQueueTimer? sponsorTimer;
@@ -119,9 +122,14 @@ public sealed partial class PlayerPage : Page
         handledFailure = false;
 
         var playbackItem = new MediaPlaybackItem(source);
-        var mediaPlayer = new MediaPlayer { AutoPlay = true };
+        var mediaPlayer = new MediaPlayer
+        {
+            AutoPlay = true,
+            Volume = App.Session.PlayerSettings.LoadVolume(),
+        };
         mediaPlayer.MediaOpened += OnMediaOpened;
         mediaPlayer.MediaFailed += OnMediaFailed;
+        mediaPlayer.VolumeChanged += OnVolumeChanged;
         mediaPlayer.PlaybackSession.PlaybackStateChanged += OnPlaybackStateChanged;
         mediaPlayer.Source = playbackItem;
 
@@ -304,6 +312,14 @@ public sealed partial class PlayerPage : Page
 
     private void TearDownPlayer()
     {
+        // A volume change still waiting out its debounce is flushed now — leaving the page
+        // must not lose the last adjustment.
+        if (volumeSaveTimer is { IsRunning: true })
+        {
+            volumeSaveTimer.Stop();
+            App.Session.PlayerSettings.SaveVolume(pendingVolume);
+        }
+
         progressTimer?.Stop();
         progressTimer = null;
         stallTimer?.Stop();
@@ -313,6 +329,7 @@ public sealed partial class PlayerPage : Page
         {
             p.MediaOpened -= OnMediaOpened;
             p.MediaFailed -= OnMediaFailed;
+            p.VolumeChanged -= OnVolumeChanged;
             p.PlaybackSession.PlaybackStateChanged -= OnPlaybackStateChanged;
             Player.SetMediaPlayer(null);
             p.Dispose();
@@ -343,6 +360,28 @@ public sealed partial class PlayerPage : Page
     }
 
     private void OnBack(object sender, RoutedEventArgs e) => Frame.GoBack();
+
+    /// Debounced volume persistence: the transport slider fires VolumeChanged per notch of a
+    /// drag, so the write waits half a second after the last change. Saving here (rather than
+    /// only on page exit) also survives the window being closed mid-playback.
+    private void OnVolumeChanged(MediaPlayer sender, object args) => dispatcher.TryEnqueue(() =>
+    {
+        if (player != sender) return;
+        var volume = sender.Volume;
+        volumeSaveTimer ??= CreateVolumeSaveTimer();
+        pendingVolume = volume;
+        volumeSaveTimer.Stop();
+        volumeSaveTimer.Start();
+    });
+
+    private DispatcherQueueTimer CreateVolumeSaveTimer()
+    {
+        var timer = dispatcher.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(500);
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => App.Session.PlayerSettings.SaveVolume(pendingVolume);
+        return timer;
+    }
 
     /// Clicking the video surface toggles play/pause. The transport controls' own buttons
     /// mark their pointer events handled, so a Tapped reaching here is on the video itself.

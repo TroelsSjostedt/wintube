@@ -32,6 +32,7 @@ public sealed class Session
     public VideoMetadataService Metadata { get; }
     public SponsorBlockService SponsorBlock { get; }
     public WatchProgressStore Progress { get; } = new(DataDirectory);
+    public PlayerSettingsStore PlayerSettings { get; } = new(DataDirectory);
     public WatchHistoryStore History { get; } = new(DataDirectory);
     public WatchProgressSync? ProgressSync { get; }
 
