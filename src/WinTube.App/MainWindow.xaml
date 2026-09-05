@@ -26,7 +26,7 @@
             <Frame x:Name="RootFrame"/>
         </NavigationView>
         <InfoBar x:Name="UpdateBar" IsOpen="False" Severity="Success"
-                 VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="16">
+                 VerticalAlignment="Top" HorizontalAlignment="Center" Margin="16">
             <InfoBar.ActionButton>
                 <Button Content="Restart" Click="OnRestartForUpdate"/>
             </InfoBar.ActionButton>

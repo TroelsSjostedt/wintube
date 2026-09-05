@@ -10,7 +10,7 @@ public sealed class UpdateService
 {
     private const string RepoUrl = "https://github.com/TroelsSjostedt/wintube";
 
-    private readonly UpdateManager manager = new(new GithubSource(RepoUrl, null, false));
+    private UpdateManager? manager;
     private UpdateInfo? pending;
 
     /// Checks and silently downloads. Returns the version string ready to apply, or null.
@@ -18,6 +18,7 @@ public sealed class UpdateService
     {
         try
         {
+            manager ??= new UpdateManager(new GithubSource(RepoUrl, null, false));
             if (!manager.IsInstalled) return null;
             pending = await manager.CheckForUpdatesAsync();
             if (pending is null) return null;
@@ -36,6 +37,6 @@ public sealed class UpdateService
     public void ApplyAndRestart()
     {
         if (pending is null) return;
-        manager.ApplyUpdatesAndRestart(pending.TargetFullRelease);
+        manager!.ApplyUpdatesAndRestart(pending.TargetFullRelease);
     }
 }

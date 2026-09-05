@@ -1,6 +1,8 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
+using Velopack;
+using Velopack.Sources;
 
 namespace WinTube.App;
 
@@ -8,10 +10,19 @@ namespace WinTube.App;
 /// to the running instance instead of opening a second window.
 public static class Program
 {
+    private const string RepoUrl = "https://github.com/TroelsSjostedt/wintube";
+
     [STAThread]
     public static int Main(string[] args)
     {
-        Velopack.VelopackApp.Build().Run();
+        // Velopack's default behavior applies any staged update and exits the process BEFORE
+        // any of our own code runs. If a wintube:// click launches a second process while an
+        // update is staged, that default would apply the update and exit here - never reaching
+        // the single-instance redirect below, so the activation that triggered this launch is
+        // silently dropped. Disable the auto-apply-on-startup default; the main-instance path
+        // below applies a staged update explicitly, once we know this process is the one that
+        // will actually keep running.
+        VelopackApp.Build().SetAutoApplyOnStartup(false).Run();
 
         WinRT.ComWrappersSupport.InitializeComWrappers();
 
@@ -32,6 +43,25 @@ public static class Program
             });
             done.Wait(TimeSpan.FromSeconds(10));
             return 0;
+        }
+
+        // This process is the one that will keep running, so it's safe to apply an update that
+        // was staged (and left un-restarted) on an earlier launch. Doing this only here - after
+        // the redirect check above - is what keeps a pending update from swallowing an
+        // activation meant for the running instance.
+        try
+        {
+            var manager = new UpdateManager(new GithubSource(RepoUrl, null, false));
+            if (manager.IsInstalled && manager.UpdatePendingRestart is { } pendingAsset)
+            {
+                manager.ApplyUpdatesAndRestart(pendingAsset);
+                return 0;
+            }
+        }
+        catch (Exception e)
+        {
+            WinTube.Core.Sync.WatchProgressSync.LogTo(Session.DataDirectory,
+                $"pending update apply failed: {e.Message}");
         }
 
         Application.Start(p =>
