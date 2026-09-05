@@ -344,6 +344,15 @@ public sealed partial class PlayerPage : Page
 
     private void OnBack(object sender, RoutedEventArgs e) => Frame.GoBack();
 
+    /// Clicking the video surface toggles play/pause. The transport controls' own buttons
+    /// mark their pointer events handled, so a Tapped reaching here is on the video itself.
+    private void OnPlayerTapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (player is not { } p) return;
+        if (p.PlaybackSession.PlaybackState == MediaPlaybackState.Playing) p.Pause();
+        else p.Play();
+    }
+
     // MARK: channel link
 
     private void OnAuthorEntered(object sender, PointerRoutedEventArgs e) =>

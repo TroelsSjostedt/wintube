@@ -28,7 +28,8 @@
         </Grid>
 
         <Grid Grid.Row="1">
-            <MediaPlayerElement x:Name="Player" AreTransportControlsEnabled="True"/>
+            <MediaPlayerElement x:Name="Player" AreTransportControlsEnabled="True"
+                                Tapped="OnPlayerTapped"/>
 
             <Border x:Name="SkipToast" Visibility="Collapsed"
                     VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,96"
