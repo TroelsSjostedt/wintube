@@ -1,0 +1,98 @@
+<title>WinTube Comments</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5; --ink: #24211E; --muted: #6B645C; --accent: #A63D2F;
+    --line: #E4DFD8; --card: #FFFFFF; --code-bg: #F1EDE7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+      --line: #35302B; --card: #242019; --code-bg: #262119;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+    --line: #35302B; --card: #242019; --code-bg: #262119;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: "Public Sans", "Segoe UI", system-ui, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; padding: 0 1.25rem 6rem; }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2 { font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  p { margin: .75rem 0; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; font-family: "IBM Plex Mono", Consolas, monospace; font-size: .85em; }
+  .eyebrow { font-family: "Schibsted Grotesk", sans-serif; font-size: .72rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 3.5rem 0 .25rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; color: var(--muted); font-size: .85rem; margin: 1rem 0 0; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: "Schibsted Grotesk", sans-serif; font-size: .78rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: .4rem .75rem .4rem 0; }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .75rem .55rem 0; vertical-align: top; }
+  td:first-child, th:first-child { padding-left: 0; }
+  ul { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Stage 8 · Approved 2026-09-05</p>
+  <h1>WinTube Comments</h1>
+  <p>A Comments button in the player opens a translucent panel along the right edge — over the
+  video, which keeps playing — with the top comments and one level of replies. Read-only, as
+  on tvOS: no likes, no posting.</p>
+  <div class="meta">
+    <span><b>tvOS arbiters</b> Player/CommentService.swift · Player/CommentsOverlayView.swift</span>
+    <span><b>Base</b> WinTube stages 1–7</span>
+  </div>
+</header>
+
+<h2>1 · Core (port of CommentService.swift)</h2>
+<div class="table-wrap"><table>
+  <tr><th>Piece</th><th>Decision</th></tr>
+  <tr><td><code>ClientKind.Web</code></td><td>New identity in <code>Clients.cs</code>: name <code>WEB</code>, version <code>2.20260726.00.00</code>, nameId <code>1</code>, Chrome-on-Mac UA and referer <code>https://www.youtube.com</code> — the exact values from AppConfig.swift. Unauthenticated: comment calls send no Bearer.</td></tr>
+  <tr><td>Two-step fetch</td><td><code>TopLevelAsync(videoId)</code>: <code>/next {"videoId"}</code> only locates the comments — the continuation token on the watch page's <code>itemSectionRenderer</code> with <code>sectionIdentifier == "comment-item-section"</code>. No such section → a typed "comments unavailable" failure (comments are off for the video). The token then feeds the shared page fetch.</td></tr>
+  <tr><td><code>PageAsync(continuation)</code></td><td>One parser for every page shape: comment bodies are <code>commentEntityPayload</code> entities keyed by commentId in <code>frameworkUpdates</code>; ordering and reply tokens come from the renderer list (<code>commentThreadRenderer</code> wrappers on top-level pages — each holding at most one replies <code>continuationCommand</code>; bare <code>commentViewModel</code>s in order on reply pages). A page's own next-page token is the <em>trailing</em> <code>continuationItemRenderer</code> of the response's continuation-items list — never the tokens nested inside threads.</td></tr>
+  <tr><td>Models</td><td><code>CommentItem(Id, Author, AvatarUrl, Text, PublishedTime, LikeCount, ReplyCount, RepliesToken)</code> — author is the "@handle", timestamps and counts are InnerTube's pre-formatted strings shown verbatim, LikeCount falls back to "0", RepliesToken null when the comment has no replies. <code>CommentPage(Comments, Continuation)</code> with null continuation when exhausted.</td></tr>
+  <tr><td>Text fidelity</td><td>Emoji arrive literally and are shown; formatting markup arrives raw and is shown verbatim — the tvOS prototype compromise, kept.</td></tr>
+</table></div>
+
+<h2>2 · The panel (port of CommentsOverlayView.swift)</h2>
+<div class="table-wrap"><table>
+  <tr><th>Aspect</th><th>Decision</th></tr>
+  <tr><td>Entry</td><td>A "Comments" button in the player's title bar beside Copy link. Toggles the panel; Esc closes it too.</td></tr>
+  <tr><td>Shape</td><td>400 px column pinned to the player's right edge, full height under the title bar, dark translucent background — dark enough to read white text over any frame, light enough that the picture shows through. The video keeps playing and its transport controls keep working.</td></tr>
+  <tr><td>Row</td><td>Avatar (32 px circle), "@handle · 2 years ago" muted line, the comment text (wrapping), and a muted "👍 1.2K · 14 replies" line. Rows with replies are clickable.</td></tr>
+  <tr><td>Levels</td><td>Two, as YouTube's threads are flat: the top-level list, and one comment's replies with that comment pinned above them and a back button. Opening replies replaces the list; back returns to the top-level list at the same scroll position.</td></tr>
+  <tr><td>Paging</td><td>A "Load more" row at the bottom while a continuation exists — top-level pages and "show more replies" pages alike.</td></tr>
+  <tr><td>Lifetime</td><td>Loaded on first open per video; closing keeps the loaded list for reopening. Navigating away from the player (or to a new video) discards everything.</td></tr>
+</table></div>
+
+<h2>3 · Errors and edges</h2>
+<ul>
+  <li><b>Comments off:</b> the panel shows one quiet line — "Comments aren't available for this
+  video." No retry.</li>
+  <li><b>Network failure:</b> an error line with a Retry button, inside the panel. Playback is
+  never touched by any comment failure.</li>
+  <li><b>Empty page:</b> a video with a comment section but zero comments shows the panel with
+  "No comments yet."</li>
+</ul>
+
+<h2>4 · Testing</h2>
+<ul>
+  <li>Core: parser tests against synthetic <code>/next</code> responses — the two-step token
+  discovery, unavailable (no section), both page shapes (threads vs bare view models), reply
+  tokens present/absent, like-count fallback, trailing-vs-nested continuation tokens, empty
+  page.</li>
+  <li>The WEB client's request shape (no Bearer, correct headers) pinned by a test.</li>
+  <li>UI verified visually — panel over playing video, drill-down and back, load more, Esc.</li>
+</ul>
+
+<h2>5 · Deliberately out</h2>
+<ul>
+  <li>Posting, liking, sorting toggles, channel-owner badges, hearts — none of it is in tvOS.</li>
+  <li>Rendering comment markup/links; timestamps in comments are not clickable.</li>
+</ul>
+</main>
