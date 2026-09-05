@@ -383,11 +383,17 @@ public sealed partial class PlayerPage : Page
         return timer;
     }
 
-    /// Clicking the video surface toggles play/pause. The transport controls' own buttons
-    /// mark their pointer events handled, so a Tapped reaching here is on the video itself.
+    /// Clicking the video surface toggles play/pause. Tapped bubbles up from the transport
+    /// controls too (their buttons don't all mark it handled), so anything originating inside
+    /// MediaTransportControls is explicitly left alone.
     private void OnPlayerTapped(object sender, TappedRoutedEventArgs e)
     {
         if (player is not { } p) return;
+        for (var element = e.OriginalSource as DependencyObject; element is not null;
+             element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element))
+        {
+            if (element is MediaTransportControls) return;
+        }
         if (p.PlaybackSession.PlaybackState == MediaPlaybackState.Playing) p.Pause();
         else p.Play();
     }
