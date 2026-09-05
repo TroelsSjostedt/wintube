@@ -2,61 +2,66 @@ using WinTube.Core;
 
 namespace WinTube.Core.Tests;
 
-public class SecretsTests
+public class SecretsTests : IDisposable
 {
-    [Fact]
-    public void Load_ReadsAllThreeValues()
+    private readonly string directory =
+        Path.Combine(Path.GetTempPath(), "wintube-tests-" + Guid.NewGuid().ToString("N"));
+    private string FilePath => Path.Combine(directory, "secrets.json");
+
+    public void Dispose()
     {
-        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        File.WriteAllText(path,
-            """{"innerTubeApiKey":"KEY","oauthClientId":"ID","oauthClientSecret":"SECRET"}""");
-        try
-        {
-            var secrets = Secrets.Load(path);
-            Assert.Equal("KEY", secrets.InnerTubeApiKey);
-            Assert.Equal("ID", secrets.OAuthClientId);
-            Assert.Equal("SECRET", secrets.OAuthClientSecret);
-        }
-        finally { File.Delete(path); }
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
     }
 
     [Fact]
-    public void Load_MissingFile_ReturnsEmptyStrings()
+    public void MissingFile_YieldsTheEmbeddedDefaults()
     {
-        var secrets = Secrets.Load(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
-        Assert.Equal("", secrets.InnerTubeApiKey);
-        Assert.Equal("", secrets.OAuthClientId);
-        Assert.Equal("", secrets.OAuthClientSecret);
+        var secrets = Secrets.Load(FilePath);
+        Assert.Equal("AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8", secrets.InnerTubeApiKey);
+        Assert.Equal("861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com",
+            secrets.OAuthClientId);
+        Assert.Equal("SboVhoG9s0rNafixCSGGKXAT", secrets.OAuthClientSecret);
+        Assert.Equal("", secrets.AppwriteHost);      // sync stays opt-in
+        Assert.Equal("", secrets.AppwriteProjectId);
     }
 
     [Fact]
-    public void Load_ReadsOptionalAppwriteValues()
+    public void PartialFile_OverridesOnlyItsOwnFields()
     {
-        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        File.WriteAllText(path, """
-            {"innerTubeApiKey":"K","oauthClientId":"I","oauthClientSecret":"S",
-             "appwriteHost":"appwrite.example.dk","appwriteProjectId":"metube"}
-            """);
-        try
-        {
-            var secrets = Secrets.Load(path);
-            Assert.Equal("appwrite.example.dk", secrets.AppwriteHost);
-            Assert.Equal("metube", secrets.AppwriteProjectId);
-        }
-        finally { File.Delete(path); }
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(FilePath, "{\"innerTubeApiKey\":\"MY_KEY\",\"appwriteHost\":\"my.host\"}");
+        var secrets = Secrets.Load(FilePath);
+        Assert.Equal("MY_KEY", secrets.InnerTubeApiKey);
+        Assert.Equal(Secrets.Defaults.OAuthClientId, secrets.OAuthClientId);
+        Assert.Equal(Secrets.Defaults.OAuthClientSecret, secrets.OAuthClientSecret);
+        Assert.Equal("my.host", secrets.AppwriteHost);
     }
 
     [Fact]
-    public void Load_AbsentAppwriteValues_AreEmpty()
+    public void EmptyFieldInFile_FallsBackToTheDefault()
     {
-        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        File.WriteAllText(path, """{"innerTubeApiKey":"K"}""");
-        try
-        {
-            var secrets = Secrets.Load(path);
-            Assert.Equal("", secrets.AppwriteHost);
-            Assert.Equal("", secrets.AppwriteProjectId);
-        }
-        finally { File.Delete(path); }
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(FilePath, "{\"oauthClientId\":\"\"}");
+        Assert.Equal(Secrets.Defaults.OAuthClientId, Secrets.Load(FilePath).OAuthClientId);
+    }
+
+    [Fact]
+    public void FullFile_WinsOnEveryField()
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(FilePath, "{\"innerTubeApiKey\":\"K\",\"oauthClientId\":\"I\"," +
+            "\"oauthClientSecret\":\"S\",\"appwriteHost\":\"H\",\"appwriteProjectId\":\"P\"}");
+        var secrets = Secrets.Load(FilePath);
+        Assert.Equal(("K", "I", "S", "H", "P"),
+            (secrets.InnerTubeApiKey, secrets.OAuthClientId, secrets.OAuthClientSecret,
+             secrets.AppwriteHost, secrets.AppwriteProjectId));
+    }
+
+    [Fact]
+    public void CorruptFile_YieldsTheDefaults()
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(FilePath, "{not json");
+        Assert.Equal(Secrets.Defaults.InnerTubeApiKey, Secrets.Load(FilePath).InnerTubeApiKey);
     }
 }
