@@ -57,6 +57,10 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
 
     private void RenderVideo()
     {
+        // Container recycling can rebind Video on a live card (scroll while hovering, no
+        // PointerExited/Unloaded first) — cold the OLD identity before the new one takes over,
+        // or the coordinator's hosts/gate stay stuck on an id this card can no longer report.
+        App.Previews.Detach(this);
         if (Video is not { } video) return;
 
         Thumbnail.Source = new BitmapImage(
@@ -168,7 +172,7 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
             item.LostFocus -= OnListViewItemLostFocus;
         }
         listViewItem = null;
-        App.Previews.Cold(this);
+        App.Previews.Detach(this);
     }
 
     private void OnPointerEntered(object sender, PointerRoutedEventArgs e) => App.Previews.Warm(this);

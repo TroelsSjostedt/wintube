@@ -41,6 +41,27 @@ public sealed class PreviewCoordinator
         hosts.Remove(id);
     }
 
+    /// A ListView container is about to be rebound to a different `Video` (or unloaded) —
+    /// cold every id this host instance is still registered under, keyed by the OLD identity
+    /// rather than `host.PreviewVideoId` (which already reflects the new one by the time
+    /// OnVideoChanged runs). Without this, container recycling during a live preview leaves a
+    /// stuck `hosts` entry and a gate permanently locked on an id no card can ever cold again.
+    public void Detach(IPreviewHost host)
+    {
+        List<string>? stale = null;
+        foreach (var (id, mapped) in hosts)
+        {
+            if (ReferenceEquals(mapped, host)) (stale ??= []).Add(id);
+        }
+        if (stale is null) return;
+        foreach (var id in stale)
+        {
+            if (pendingId == id) { pendingId = null; dwellTimer?.Stop(); }
+            StopIfTold(gate.Cold(id));
+            hosts.Remove(id);
+        }
+    }
+
     private DispatcherQueueTimer CreateDwellTimer()
     {
         var timer = DispatcherQueue.GetForCurrentThread().CreateTimer();
