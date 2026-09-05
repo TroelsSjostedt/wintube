@@ -13,15 +13,21 @@
                 <NavigationViewItem x:Name="HistoryItem" Content="History" Tag="History"/>
             </NavigationView.MenuItems>
             <NavigationView.PaneFooter>
-                <Button x:Name="ProfileButton" HorizontalAlignment="Stretch" Margin="4,8"
-                        HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0">
-                    <TextBlock x:Name="ProfileName" TextTrimming="CharacterEllipsis"/>
-                    <Button.Flyout>
-                        <Flyout>
-                            <Button Content="Sign out" Click="OnSignOut"/>
-                        </Flyout>
-                    </Button.Flyout>
-                </Button>
+                <StackPanel>
+                    <Button x:Name="ProfileButton" HorizontalAlignment="Stretch" Margin="4,8,4,0"
+                            HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0">
+                        <TextBlock x:Name="ProfileName" TextTrimming="CharacterEllipsis"/>
+                        <Button.Flyout>
+                            <Flyout>
+                                <Button Content="Sign out" Click="OnSignOut"/>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                    <TextBlock x:Name="VersionLink" Margin="16,2,4,8" FontSize="12"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               PointerEntered="OnVersionEntered" PointerExited="OnVersionExited"
+                               Tapped="OnVersionTapped"/>
+                </StackPanel>
             </NavigationView.PaneFooter>
             <Frame x:Name="RootFrame"/>
         </NavigationView>
