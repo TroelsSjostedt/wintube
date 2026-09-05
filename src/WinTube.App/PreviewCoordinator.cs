@@ -85,7 +85,12 @@ public sealed class PreviewCoordinator
         var cts = resolving = new CancellationTokenSource();
         try
         {
-            var stream = await App.Session.Streams.ResolveAsync(id, after: null, cts.Token);
+            // Previews resolve straight to the ANDROID rung's muxed 360p MP4: the VISIONOS
+            // HLS manifest routinely refuses to open in a bare MediaPlayer (SourceNotSupported
+            // or a hang in Opening — PlayerPage survives that only via its retry ladder), and
+            // 360p progressive is exactly the right weight for a 320 px tile anyway.
+            var stream = await App.Session.Streams.ResolveAsync(
+                id, after: WinTube.Core.InnerTube.ClientKind.VisionOs, cts.Token);
             // Preempted or gone cold while resolving — a stale stream must not start playing.
             if (cts.IsCancellationRequested || !gate.IsActive(id)) return;
 
@@ -109,7 +114,9 @@ public sealed class PreviewCoordinator
             {
                 AutoPlay = true,
                 IsMuted = true,
-                Source = source,
+                // Wrapped exactly as PlayerPage wraps its source — a raw MediaSource set
+                // directly as Source has been seen to hang in Opening.
+                Source = new MediaPlaybackItem(source),
             };
             playerId = id;
             if (hosts.TryGetValue(id, out var host)) host.ShowPreview(player);
