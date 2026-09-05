@@ -29,7 +29,7 @@ jobs:
       - name: Pack
         run: >
           vpk pack -u WinTubeApp -v ${{ env.VERSION }} -p publish
-          -e WinTube.App.exe --packTitle WinTube
+          -e WinTube.App.exe --packTitle WinTube -i src/WinTube.App/Assets/wintube.ico
       - name: Upload release
         run: >
           vpk upload github --repoUrl https://github.com/TroelsSjostedt/wintube

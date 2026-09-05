@@ -23,6 +23,8 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // The exe icon covers Explorer; the window object needs its own for taskbar/title bar.
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "wintube.ico"));
         App.Session.SignedOut += OnSessionSignedOut;
         Activated += OnActivated;
         Closed += OnClosed;

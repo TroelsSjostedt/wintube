@@ -11,6 +11,7 @@
     <Platforms>x64</Platforms>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\wintube.ico</ApplicationIcon>
     <!-- Building inside a Visual Studio that lacks the C++ toolset, the XAML compiler's
          GetVCInstallPath target crashes enumerating $(VsInstallRoot)\VC\Tools\MSVC. The
          vcmeta.dll it is probing for is only consulted for C++ projects — CLI builds run
@@ -28,5 +29,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\WinTube.Core\WinTube.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Copied beside the exe so MainWindow can hand the taskbar/title-bar icon to AppWindow. -->
+    <Content Include="Assets\wintube.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <!-- The master icon: two play triangles rotated 100 degrees clockwise (each around its own
+       center, the rear one nudged left to keep the overlap), red in front of white, on the
+       app's dark tile. Rasterized to Assets/wintube.ico by scratchpad script make-icon.ps1's
+       precomputed points. -->
+  <rect width="96" height="96" rx="22" fill="#1B1B1F"/>
+  <polygon points="48,30 74,48 48,66" fill="#FFFFFF" transform="translate(-7 0) rotate(100 57 48)"/>
+  <polygon points="22,30 48,48 22,66" fill="#E5342B" transform="rotate(100 31 48)"/>
+</svg>
