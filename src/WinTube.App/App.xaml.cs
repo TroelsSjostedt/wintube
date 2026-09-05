@@ -12,6 +12,7 @@ public partial class App : Application
     public static HttpClient Http { get; } = new();
     public static Secrets Secrets { get; } = Secrets.Load();
     public static Session Session { get; } = new(Http, Secrets);
+    public static PreviewCoordinator Previews { get; } = new();
 
     public static MainWindow? Window { get; private set; }
 

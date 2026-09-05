@@ -1,7 +1,10 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.Media.Playback;
 using WinTube.Core.Feed;
 using WinTube.Core.Models;
 
@@ -12,7 +15,7 @@ namespace WinTube.App.Controls;
 /// its own clickable/hoverable link into ChannelPage. Stateless beyond its two dependency
 /// properties — callers (HomePage, Search/History/Channel) own the paging and progress-tracking
 /// state, this just renders one VideoItem.
-public sealed partial class VideoCard : UserControl
+public sealed partial class VideoCard : UserControl, IPreviewHost
 {
     private const double CardWidth = 320;
 
@@ -111,5 +114,78 @@ public sealed partial class VideoCard : UserControl
     private void OnGoToChannel(object sender, RoutedEventArgs e)
     {
         if (Video is { } video) ChannelClicked?.Invoke(this, video);
+    }
+
+    // MARK: hover/focus preview (IPreviewHost)
+
+    private ListViewItem? listViewItem;
+    private MediaPlayer? previewPlayer;
+
+    string IPreviewHost.PreviewVideoId => Video?.Id ?? "";
+
+    void IPreviewHost.ShowPreview(MediaPlayer player)
+    {
+        previewPlayer = player;
+        player.PlaybackSession.PlaybackStateChanged += OnPreviewPlaybackStateChanged;
+    }
+
+    void IPreviewHost.HidePreview()
+    {
+        PreviewSurface.Opacity = 0;
+        PreviewSurface.SetMediaPlayer(null);
+        if (previewPlayer is { } player) player.PlaybackSession.PlaybackStateChanged -= OnPreviewPlaybackStateChanged;
+        previewPlayer = null;
+    }
+
+    /// Fires on a background thread; marshal before touching the surface. The thumbnail stays
+    /// standing until there is a real frame to show.
+    private void OnPreviewPlaybackStateChanged(MediaPlaybackSession sender, object args)
+    {
+        if (sender.PlaybackState != MediaPlaybackState.Playing) return;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (previewPlayer is not { } player || player.PlaybackSession != sender) return;
+            PreviewSurface.SetMediaPlayer(player);
+            PreviewSurface.Opacity = 1;
+        });
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        listViewItem = FindListViewItemAncestor(this);
+        if (listViewItem is { } item)
+        {
+            item.GotFocus += OnListViewItemGotFocus;
+            item.LostFocus += OnListViewItemLostFocus;
+        }
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (listViewItem is { } item)
+        {
+            item.GotFocus -= OnListViewItemGotFocus;
+            item.LostFocus -= OnListViewItemLostFocus;
+        }
+        listViewItem = null;
+        App.Previews.Cold(this);
+    }
+
+    private void OnPointerEntered(object sender, PointerRoutedEventArgs e) => App.Previews.Warm(this);
+
+    private void OnPointerExited(object sender, PointerRoutedEventArgs e) => App.Previews.Cold(this);
+
+    private void OnListViewItemGotFocus(object sender, RoutedEventArgs e) => App.Previews.Warm(this);
+
+    private void OnListViewItemLostFocus(object sender, RoutedEventArgs e) => App.Previews.Cold(this);
+
+    private static ListViewItem? FindListViewItemAncestor(DependencyObject start)
+    {
+        for (var parent = VisualTreeHelper.GetParent(start); parent is not null;
+             parent = VisualTreeHelper.GetParent(parent))
+        {
+            if (parent is ListViewItem item) return item;
+        }
+        return null;
     }
 }
