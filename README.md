@@ -15,18 +15,27 @@ recommendations, search, and play videos with resume — as an ordinary windowed
 mouse-and-keyboard app instead of a 10-foot remote-driven one. Same account, same InnerTube
 recipe, same watch-progress rules.
 
-## Setup
+## Install
+
+Download the latest `*-Setup.exe` from
+[the releases page](https://github.com/TroelsSjostedt/wintube/releases/latest) and run it.
+SmartScreen will warn — this is an unsigned personal project — so pick "More info" and then
+"Run anyway". It installs per-user (no admin), puts WinTube in the Start menu, and launches.
+Sign in with the device code it shows. Updates arrive automatically: the app checks at
+startup and applies new versions on the next restart.
+
+## Optional overrides
+
+The app ships with the public YouTube-on-TV client constants embedded (the same app-identity
+values every TV firmware carries — nothing personal). A `%LOCALAPPDATA%\WinTube\secrets.json`
+can override them field by field, and is also where the optional watch-progress sync fields
+go:
 
 ```powershell
 mkdir $env:LOCALAPPDATA\WinTube -ea 0
 cp secrets.example.json $env:LOCALAPPDATA\WinTube\secrets.json
 notepad $env:LOCALAPPDATA\WinTube\secrets.json
 ```
-
-Fill in the same three values as the tvOS repo's `YouTubeTV/Config/Secrets.xcconfig`: the
-public InnerTube web API key, and the YouTube-on-TV OAuth client id and secret. These are not
-per-user secrets — they are kept out of the repo the same way the tvOS app keeps them out of
-its repo.
 
 ## Build, run, test
 

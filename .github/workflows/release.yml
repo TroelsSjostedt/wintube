@@ -1,0 +1,37 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Test
+        run: dotnet test tests/WinTube.Core.Tests
+      - name: Publish
+        run: >
+          dotnet publish src/WinTube.App -c Release -p:Platform=x64 -r win-x64
+          --self-contained -p:WindowsAppSDKSelfContained=true -o publish
+      - name: Version from tag
+        shell: pwsh
+        run: '"VERSION=$($env:GITHUB_REF_NAME.TrimStart(''v''))" >> $env:GITHUB_ENV'
+      - name: Install vpk
+        run: dotnet tool install -g vpk
+      - name: Download previous releases (delta chain)
+        run: vpk download github --repoUrl https://github.com/TroelsSjostedt/wintube
+        continue-on-error: true
+      - name: Pack
+        run: >
+          vpk pack -u WinTubeApp -v ${{ env.VERSION }} -p publish
+          -e WinTube.App.exe --packTitle WinTube
+      - name: Upload release
+        run: >
+          vpk upload github --repoUrl https://github.com/TroelsSjostedt/wintube
+          --publish --releaseName "WinTube v${{ env.VERSION }}" --tag ${{ github.ref_name }}
+          --token ${{ secrets.GITHUB_TOKEN }}
