@@ -10,6 +10,9 @@ public enum ClientKind
     VisionOs,
     /// ANDROID — playback fallback, muxed itag 18 only (360p). Needs nothing.
     Android,
+    /// WEB — comments via /next, the one client verified to return the comment section.
+    /// Unauthenticated.
+    Web,
 }
 
 public sealed record ClientInfo(
@@ -31,6 +34,8 @@ public static class Clients
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
     private const string AndroidUserAgent =
         "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip";
+    private const string WebUserAgent =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
     private static readonly Dictionary<string, object> NoExtra = [];
 
@@ -64,11 +69,17 @@ public static class Clients
             ["osVersion"] = "11",
         });
 
+    private static readonly ClientInfo Web = new(
+        Name: "WEB", Version: "2.20260726.00.00", NameId: "1",
+        UserAgent: WebUserAgent, Referer: "https://www.youtube.com",
+        Host: "https://www.youtube.com", RequiresVisitorData: false, ExtraContext: NoExtra);
+
     public static ClientInfo Get(ClientKind kind) => kind switch
     {
         ClientKind.Tv => Tv,
         ClientKind.VisionOs => VisionOs,
         ClientKind.Android => Android,
+        ClientKind.Web => Web,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 }
