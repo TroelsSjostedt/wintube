@@ -35,17 +35,22 @@
                                     <TextBlock Text="{x:Bind Title}"
                                                Visibility="{x:Bind TitleVisibility}"
                                                Style="{StaticResource SubtitleTextBlockStyle}"/>
+                                    <controls:ShelfScroller>
                                     <ListView ItemsSource="{x:Bind Items}"
                                               Tag="{x:Bind}"
                                               Visibility="{x:Bind VideoRowVisibility}"
                                               SelectionMode="None"
                                               IsItemClickEnabled="False"
-                                              ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                              ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                                          ScrollViewer.HorizontalScrollMode="Enabled"
+                                          ScrollViewer.IsHorizontalRailEnabled="True"
+                                          ScrollViewer.IsVerticalRailEnabled="True"
                                               ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                          ScrollViewer.VerticalScrollMode="Disabled"
                                               Loaded="OnRowLoaded">
                                         <ListView.ItemsPanel>
                                             <ItemsPanelTemplate>
-                                                <StackPanel Orientation="Horizontal" Spacing="12"/>
+                                                <StackPanel Orientation="Horizontal" Spacing="12" Background="Transparent"/>
                                             </ItemsPanelTemplate>
                                         </ListView.ItemsPanel>
                                         <ListView.ItemTemplate>
@@ -57,18 +62,24 @@
                                             </DataTemplate>
                                         </ListView.ItemTemplate>
                                     </ListView>
+                                    </controls:ShelfScroller>
+                                    <controls:ShelfScroller>
                                     <ListView ItemsSource="{x:Bind Items}"
                                               Tag="{x:Bind}"
                                               Visibility="{x:Bind ShortRowVisibility}"
                                               Height="267"
                                               SelectionMode="None"
                                               IsItemClickEnabled="False"
-                                              ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                              ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                                          ScrollViewer.HorizontalScrollMode="Enabled"
+                                          ScrollViewer.IsHorizontalRailEnabled="True"
+                                          ScrollViewer.IsVerticalRailEnabled="True"
                                               ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                          ScrollViewer.VerticalScrollMode="Disabled"
                                               Loaded="OnRowLoaded">
                                         <ListView.ItemsPanel>
                                             <ItemsPanelTemplate>
-                                                <StackPanel Orientation="Horizontal" Spacing="12"/>
+                                                <StackPanel Orientation="Horizontal" Spacing="12" Background="Transparent"/>
                                             </ItemsPanelTemplate>
                                         </ListView.ItemsPanel>
                                         <ListView.ItemTemplate>
@@ -78,6 +89,7 @@
                                             </DataTemplate>
                                         </ListView.ItemTemplate>
                                     </ListView>
+                                    </controls:ShelfScroller>
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
