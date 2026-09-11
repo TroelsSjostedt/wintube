@@ -9,10 +9,6 @@ namespace WinTube.App;
 /// in the same content Frame; LoginPage calls back into OnSignedIn() once it completes.
 public sealed partial class MainWindow : Window
 {
-    /// Guards NavigationView.SelectedItem assignments that are just resyncing the pane's
-    /// highlight (sign-in, sign-out) from also triggering OnSelectionChanged's navigation.
-    private bool suppressSelectionNavigation;
-
     private readonly DispatcherQueue dispatcher = DispatcherQueue.GetForCurrentThread();
 
     /// Throttles the Activated-triggered sync so rapid focus churn doesn't hammer the backend.
@@ -96,15 +92,16 @@ public sealed partial class MainWindow : Window
     public void OnSignedIn()
     {
         ProfileName.Text = App.Session.Profile?.Name ?? "";
-        suppressSelectionNavigation = true;
         Nav.SelectedItem = HomeItem;
-        suppressSelectionNavigation = false;
     }
 
-    private void OnSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    /// ItemInvoked rather than SelectionChanged: it fires on EVERY click, including on the
+    /// already-selected item — so clicking "Home" from deep inside a channel or player under
+    /// Home still lands on the section's root. A nav click is always "take me to the root",
+    /// so the back stack is cleared too.
+    private void OnItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
-        if (suppressSelectionNavigation) return;
-        var tag = (args.SelectedItemContainer as NavigationViewItem)?.Tag as string;
+        var tag = (args.InvokedItemContainer as NavigationViewItem)?.Tag as string;
         var target = tag switch
         {
             "Search" => typeof(Views.SearchPage),
@@ -113,6 +110,7 @@ public sealed partial class MainWindow : Window
             _ => typeof(Views.HomePage),
         };
         if (RootFrame.SourcePageType != target) RootFrame.Navigate(target);
+        RootFrame.BackStack.Clear();
     }
 
     private void OnSignOut(object sender, RoutedEventArgs e) => App.Session.SignOut();
@@ -145,8 +143,6 @@ public sealed partial class MainWindow : Window
         if (RootFrame.SourcePageType != typeof(Views.LoginPage))
             RootFrame.Navigate(typeof(Views.LoginPage));
         RootFrame.BackStack.Clear();
-        suppressSelectionNavigation = true;
         Nav.SelectedItem = HomeItem;
-        suppressSelectionNavigation = false;
     }
 }
