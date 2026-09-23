@@ -23,14 +23,14 @@ $actual = (Get-FileHash $archive -Algorithm SHA256).Hash
 if ($actual -ne $Sha256) { throw "libmpv archive hash mismatch: expected $Sha256, got $actual" }
 
 # Windows has no built-in .7z extractor; require 7-Zip with a clear message.
-$sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
+$sevenZip = (Get-Command 7z -ErrorAction SilentlyContinue).Source
 if (-not $sevenZip) {
     # Some installs put 7z.exe here without ever adding it to PATH.
     $fallback = "C:\Program Files\7-Zip\7z.exe"
-    if (Test-Path $fallback) { $sevenZip = Get-Item $fallback }
+    if (Test-Path $fallback) { $sevenZip = $fallback }
 }
 if (-not $sevenZip) { throw "7z not found on PATH. Install with: winget install 7zip.7zip" }
-& $sevenZip.Source e $archive -o"$dest" "libmpv-2.dll" -r -y | Out-Null
+& $sevenZip e $archive -o"$dest" "libmpv-2.dll" -r -y | Out-Null
 
 if (-not (Test-Path $dll)) { throw "libmpv-2.dll not found in archive" }
 Set-Content $marker $Sha256
