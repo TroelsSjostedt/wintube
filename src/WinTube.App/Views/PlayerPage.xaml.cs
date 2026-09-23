@@ -951,18 +951,21 @@ public sealed partial class PlayerPage : Page
         CommentsList.Visibility = Visibility.Visible;
     }
 
+    /// All four playback shortcuts (Esc/Space/Left/Right) are wired as KeyboardAccelerators
+    /// (Page.KeyboardAccelerators in XAML) rather than through routed PreviewKeyDown/KeyDown: a
+    /// routed KeyDown tunnels from whichever element currently holds focus, and that tunnel was
+    /// observed to silently stop delivering events right after a double-click-triggered
+    /// fullscreen toggle — confirmed live (for Esc first, then reproduced identically for Space
+    /// and Left) that PlayerSlot legitimately held focus (FocusManager.GetFocusedElement agreed)
+    /// and the key still never reached a routed KeyDown handler. A KeyboardAccelerator is scoped
+    /// to the XamlRoot instead of a specific focused element, and reliably fired in the same
+    /// broken state. Each accelerator is declared exactly once, statically in XAML — instantiated
+    /// once per fresh PlayerPage (OnNavigatedTo always gets a new instance, NavigationCacheMode
+    /// is the default Disabled) — so double-registration isn't reachable; nothing here adds or
+    /// removes accelerators at runtime. There's no TextBox on this page to yield focus to either.
+
     /// Esc walks the panel back one level at a time: out of a replies view first, then closes
     /// the panel entirely — matching tvOS.
-    ///
-    /// Wired as a KeyboardAccelerator (Page.KeyboardAccelerators in XAML), not through
-    /// OnKeyDown's routed PreviewKeyDown/KeyDown like Space/Left/Right below: a routed KeyDown
-    /// tunnels from whichever element currently holds focus, and that tunnel was observed to
-    /// silently stop delivering events right after a double-click-triggered fullscreen toggle —
-    /// confirmed live that PlayerSlot legitimately held focus (FocusManager.GetFocusedElement
-    /// agreed) and the key still never reached OnKeyDown. A KeyboardAccelerator is scoped to the
-    /// XamlRoot instead of a specific focused element, and reliably fired in the same broken
-    /// state. Esc owns this accelerator exclusively — OnKeyDown has no Escape branch — so a
-    /// keypress is only ever handled once.
     private void OnEscapeAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
         Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
     {
@@ -985,25 +988,27 @@ public sealed partial class PlayerPage : Page
         }
     }
 
-    private void OnKeyDown(object sender, KeyRoutedEventArgs e)
+    private void OnSpaceAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+        Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
     {
-        // No TextBox exists on this page today, so these never need to yield to text entry.
-        if (Player is not { } p) return;
+        if (Player is null) return;
+        args.Handled = true;
+        TogglePlayPause();
+        WakeTransport();
+    }
 
-        if (e.Key == Windows.System.VirtualKey.Space)
-        {
-            TogglePlayPause();
-            WakeTransport();
-            e.Handled = true;
-            return;
-        }
-        if (e.Key is Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right)
-        {
-            var delta = e.Key == Windows.System.VirtualKey.Left ? -10 : 10;
-            p.SeekTo(Math.Clamp(p.Position + delta, 0, p.Duration));
-            WakeTransport();
-            e.Handled = true;
-        }
+    private void OnLeftAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+        Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args) => Seek(-10, args);
+
+    private void OnRightAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+        Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args) => Seek(10, args);
+
+    private void Seek(int deltaSeconds, Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (Player is not { } p) return;
+        args.Handled = true;
+        p.SeekTo(Math.Clamp(p.Position + deltaSeconds, 0, p.Duration));
+        WakeTransport();
     }
 }
 
