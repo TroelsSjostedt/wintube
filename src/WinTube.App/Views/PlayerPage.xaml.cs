@@ -42,6 +42,14 @@ public sealed partial class PlayerPage : Page
     private DispatcherQueueTimer? volumeSaveTimer;
     private double pendingVolume;
 
+    // MARK: quality picker state
+    private AdaptiveMediaSource? adaptiveSource;
+    private IReadOnlyList<HlsVariant> hlsVariants = [];
+    private IReadOnlyList<HlsQuality> hlsQualities = [];
+    /// The session-wide choice, as on youtube.com: null is Auto; a height pins the nearest
+    /// rung at or below it on every video until the app closes. Deliberately not persisted.
+    private static int? preferredHeight;
+
     private IReadOnlyList<SponsorSegment> sponsorSegments = [];
     private readonly HashSet<string> sponsorSkipped = [];
     private DispatcherQueueTimer? sponsorTimer;
@@ -122,9 +130,32 @@ public sealed partial class PlayerPage : Page
         MediaSource source;
         if (stream.IsAdaptive)
         {
+            // The raw manifest now carries VP9 rungs that Media Foundation's HLS pipeline
+            // refuses outright (SourceNotSupported on open), so the master playlist is
+            // fetched, filtered to its H.264 rungs, and handed to AdaptiveMediaSource as
+            // text — the variant URIs are absolute, so the base uri is just bookkeeping.
+            string filtered;
+            try
+            {
+                using var manifestRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(stream.Url.ToString()));
+                manifestRequest.Headers.TryAddWithoutValidation("User-Agent", stream.UserAgent);
+                var manifestResponse = await App.Http.SendAsync(manifestRequest);
+                filtered = HlsVariantParser.FilterToAvc(await manifestResponse.Content.ReadAsStringAsync());
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+            {
+                if (leftPage) return;
+                await RetryOrFailAsync($"Manifest fetch failed: {e.Message}");
+                return;
+            }
+            if (leftPage) return;
+
             var http = new Windows.Web.Http.HttpClient();
             http.DefaultRequestHeaders.TryAppendWithoutValidation("User-Agent", stream.UserAgent);
-            var result = await AdaptiveMediaSource.CreateFromUriAsync(new Uri(stream.Url.ToString()), http);
+            var manifestStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(filtered));
+            var result = await AdaptiveMediaSource.CreateFromStreamAsync(
+                manifestStream.AsInputStream(), new Uri(stream.Url.ToString()),
+                "application/vnd.apple.mpegurl", http);
             if (leftPage) return;
             if (result.Status != AdaptiveMediaSourceCreationStatus.Success)
             {
@@ -132,10 +163,20 @@ public sealed partial class PlayerPage : Page
                 return;
             }
             source = MediaSource.CreateFromAdaptiveMediaSource(result.MediaSource);
+            adaptiveSource = result.MediaSource;
+            adaptiveSource.PlaybackBitrateChanged += OnPlaybackBitrateChanged;
+            hlsVariants = HlsVariantParser.Parse(filtered);
+            hlsQualities = HlsVariantParser.QualityLevels(hlsVariants);
+            BuildQualityMenu();
         }
         else
         {
+            // The muxed fallback has exactly one quality; the picker just says so.
             source = MediaSource.CreateFromUri(new Uri(stream.Url.ToString()));
+            adaptiveSource = null;
+            QualityLabel.Text = "360p";
+            QualityButton.IsEnabled = false;
+            QualityButton.Visibility = Visibility.Visible;
         }
 
         originalAudioLanguage = stream.OriginalAudioLanguage;
@@ -154,10 +195,13 @@ public sealed partial class PlayerPage : Page
         mediaPlayer.PlaybackSession.PlaybackStateChanged += OnPlaybackStateChanged;
         mediaPlayer.Source = playbackItem;
 
-        // Not attached to the element yet: a failed ladder attempt would otherwise flash the
-        // transport controls' built-in "video type not supported" while the retry is already
-        // under way. OnMediaOpened attaches the player once there is real media to show.
+        // Attached immediately: an HLS source never reaches MediaOpened in a detached
+        // MediaPlayer (the same hang the preview work uncovered), so late attachment sent
+        // every video down the 360p fallback. The error-flash this reintroduces is handled
+        // by keeping the element hidden until the media opens instead.
         player = mediaPlayer;
+        Player.Visibility = Visibility.Collapsed;
+        Player.SetMediaPlayer(mediaPlayer);
 
         stallTimer = dispatcher.CreateTimer();
         stallTimer.Interval = TimeSpan.FromSeconds(10);
@@ -172,6 +216,10 @@ public sealed partial class PlayerPage : Page
 
     private async Task RetryOrFailAsync(string reason)
     {
+        // Every ladder step-down is logged — this line is how the silent 360p-fallback era
+        // was finally caught; keep it.
+        WinTube.Core.Sync.WatchProgressSync.LogTo(Session.DataDirectory,
+            $"player retry: client={lastClient} reason={reason}");
         if (leftPage || handledFailure) return;
         handledFailure = true;
         TearDownPlayer();
@@ -193,7 +241,7 @@ public sealed partial class PlayerPage : Page
     {
         if (leftPage || player != sender) return;
 
-        Player.SetMediaPlayer(sender);
+        Player.Visibility = Visibility.Visible;
         FixVolumeButtonTooltip();
 
         var resumeSeconds = startAt?.TotalSeconds ?? App.Session.Progress.ResumePosition(video!.Id);
@@ -338,6 +386,13 @@ public sealed partial class PlayerPage : Page
 
     private void TearDownPlayer()
     {
+        if (adaptiveSource is { } source)
+            source.PlaybackBitrateChanged -= OnPlaybackBitrateChanged;
+        adaptiveSource = null;
+        hlsVariants = [];
+        hlsQualities = [];
+        QualityButton.Visibility = Visibility.Collapsed;
+
         // A volume change still waiting out its debounce is flushed now — leaving the page
         // must not lose the last adjustment.
         if (volumeSaveTimer is { IsRunning: true })
@@ -408,6 +463,76 @@ public sealed partial class PlayerPage : Page
         timer.Tick += (_, _) => App.Session.PlayerSettings.SaveVolume(pendingVolume);
         return timer;
     }
+
+    // MARK: quality picker
+
+    /// Builds the picker from the filtered manifest's rungs: Auto plus one entry per height.
+    /// AdaptiveMediaSource only exposes bitrates, so the parsed variants are what map them
+    /// to 360p/720p/1080p labels.
+    private void BuildQualityMenu()
+    {
+        if (hlsQualities.Count == 0) return;
+
+        QualityFlyout.Items.Clear();
+        var auto = new RadioMenuFlyoutItem { Text = "Auto", GroupName = "quality", IsChecked = preferredHeight is null };
+        auto.Click += (_, _) => SetPreferredHeight(null);
+        QualityFlyout.Items.Add(auto);
+        foreach (var quality in hlsQualities)
+        {
+            var item = new RadioMenuFlyoutItem
+            {
+                Text = quality.Label,
+                GroupName = "quality",
+                IsChecked = preferredHeight == quality.Height,
+            };
+            var height = quality.Height;
+            item.Click += (_, _) => SetPreferredHeight(height);
+            QualityFlyout.Items.Add(item);
+        }
+
+        QualityButton.IsEnabled = true;
+        QualityButton.Visibility = Visibility.Visible;
+        ApplyPreferredHeight();
+    }
+
+    private void SetPreferredHeight(int? height)
+    {
+        preferredHeight = height;
+        ApplyPreferredHeight();
+    }
+
+    /// Pins the nearest rung at or below the preferred height (or the lowest on offer), or
+    /// releases the pin for Auto. Pinning is exact-bandwidth: min = max = the rung's own
+    /// BANDWIDTH, which AdaptiveMediaSource resolves to exactly that variant.
+    private void ApplyPreferredHeight()
+    {
+        if (adaptiveSource is not { } source) return;
+        if (preferredHeight is { } wanted)
+        {
+            var quality = hlsQualities.FirstOrDefault(q => q.Height <= wanted) ?? hlsQualities[^1];
+            source.DesiredMinBitrate = quality.Bandwidth;
+            source.DesiredMaxBitrate = quality.Bandwidth;
+            QualityLabel.Text = quality.Label;
+        }
+        else
+        {
+            source.DesiredMinBitrate = null;
+            source.DesiredMaxBitrate = null;
+            QualityLabel.Text = CurrentAutoLabel(source.CurrentPlaybackBitrate);
+        }
+    }
+
+    /// Fires on a background thread whenever Auto shifts rung; the label follows along.
+    private void OnPlaybackBitrateChanged(AdaptiveMediaSource sender, AdaptiveMediaSourcePlaybackBitrateChangedEventArgs args) =>
+        dispatcher.TryEnqueue(() =>
+        {
+            if (leftPage || adaptiveSource != sender || preferredHeight is not null) return;
+            QualityLabel.Text = CurrentAutoLabel(args.NewValue);
+        });
+
+    private string CurrentAutoLabel(uint bitrate) =>
+        hlsVariants.FirstOrDefault(v => v.Bandwidth == bitrate) is { } variant
+            ? $"Auto · {variant.Height}p" : "Auto";
 
     /// The transport controls label their volume button with the platform's "Mute" tooltip,
     /// but clicking it opens the volume flyout — the actual mute button lives inside that

@@ -21,6 +21,9 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         // The exe icon covers Explorer; the window object needs its own for taskbar/title bar.
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "wintube.ico"));
+        // The pane's own back arrow is THE back button everywhere; it lights up whenever the
+        // frame has somewhere to go back to (player, channel chains, subscriptions drill-ins).
+        RootFrame.Navigated += (_, _) => Nav.IsBackEnabled = RootFrame.CanGoBack;
         App.Session.SignedOut += OnSessionSignedOut;
         Activated += OnActivated;
         Closed += OnClosed;
@@ -111,6 +114,12 @@ public sealed partial class MainWindow : Window
         };
         if (RootFrame.SourcePageType != target) RootFrame.Navigate(target);
         RootFrame.BackStack.Clear();
+        Nav.IsBackEnabled = false;
+    }
+
+    private void OnBackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
+    {
+        if (RootFrame.CanGoBack) RootFrame.GoBack();
     }
 
     private void OnSignOut(object sender, RoutedEventArgs e) => App.Session.SignOut();
@@ -143,6 +152,7 @@ public sealed partial class MainWindow : Window
         if (RootFrame.SourcePageType != typeof(Views.LoginPage))
             RootFrame.Navigate(typeof(Views.LoginPage));
         RootFrame.BackStack.Clear();
+        Nav.IsBackEnabled = false;
         Nav.SelectedItem = HomeItem;
     }
 }

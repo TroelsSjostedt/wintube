@@ -5,7 +5,8 @@
     Title="WinTube">
     <Grid>
         <NavigationView x:Name="Nav" PaneDisplayMode="Left" IsSettingsVisible="False"
-                        ItemInvoked="OnItemInvoked">
+                        IsBackButtonVisible="Visible" IsBackEnabled="False"
+                        BackRequested="OnBackRequested" ItemInvoked="OnItemInvoked">
             <NavigationView.MenuItems>
                 <NavigationViewItem x:Name="HomeItem" Content="Home" Tag="Home"/>
                 <NavigationViewItem x:Name="SearchItem" Content="Search" Tag="Search"/>
