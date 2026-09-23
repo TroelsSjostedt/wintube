@@ -54,6 +54,12 @@ public sealed partial class PlayerPage : Page
     /// The session-wide choice, as on youtube.com: null is Auto; a height pins the nearest
     /// rung at or below it on every video until the app closes. Deliberately not persisted.
     private static int? preferredHeight;
+    /// Seeded from the resolved resume position before the picker becomes clickable, so a
+    /// quality switch during the loading ring (before the first Opened lands and hasPlayed
+    /// flips true) reloads at the real resume point instead of Player.Position's still-0
+    /// value. Only read by ReloadAtCurrentQuality while !hasPlayed — once real positions are
+    /// flowing, Player.Position is authoritative and this goes stale on purpose.
+    private double lastKnownPosition;
 
     private IReadOnlyList<SponsorSegment> sponsorSegments = [];
     private readonly HashSet<string> sponsorSkipped = [];
@@ -163,6 +169,15 @@ public sealed partial class PlayerPage : Page
 
     private async Task PlayAsync(ResolvedStream stream)
     {
+        // Resolved and seeded into lastKnownPosition before BuildQualityMenu can make the picker
+        // clickable below — a quality switch during the loading ring, before this attempt's own
+        // Opened has landed, must reload at the real resume point, not 0. startAt is NOT cleared
+        // here — a ladder retry re-enters PlayAsync before the video has ever played, and must
+        // still resume at the original link timestamp, not recorded progress. It's cleared once,
+        // in Opened's first-play branch below.
+        var resume = startAt?.TotalSeconds ?? App.Session.Progress.ResumePosition(video!.Id) ?? 0;
+        lastKnownPosition = resume;
+
         string target;
         if (stream.IsAdaptive)
         {
@@ -220,10 +235,6 @@ public sealed partial class PlayerPage : Page
 
         hasPlayed = false;
         handledFailure = false;
-        // startAt is NOT cleared here — a ladder retry re-enters PlayAsync before the video has
-        // ever played, and must still resume at the original link timestamp, not recorded
-        // progress. It's cleared once, in Opened's first-play branch below.
-        var resume = startAt?.TotalSeconds ?? App.Session.Progress.ResumePosition(video!.Id) ?? 0;
         lastUserAgent = stream.UserAgent;
         lastAudioLanguage = stream.OriginalAudioLanguage;
 
@@ -649,7 +660,11 @@ public sealed partial class PlayerPage : Page
             {
                 Text = quality.Label,
                 GroupName = "quality",
-                IsChecked = preferredHeight == quality.Height,
+                // Checked against the RESOLVED rung (activeQuality), not the raw preference: a
+                // preference carried over from a taller video (e.g. 1080 preferred, this ladder
+                // tops at 360) must still land on the rung that's actually playing, not on
+                // nothing. Auto owns the checked mark whenever there's no manual preference.
+                IsChecked = preferredHeight is not null && quality.Height == activeQuality?.Height,
             };
             var height = quality.Height;
             item.Click += (_, _) => SetPreferredHeight(height);
@@ -664,11 +679,14 @@ public sealed partial class PlayerPage : Page
     /// Stores the choice; on an adaptive stream with a live player, reloads immediately at the
     /// new rung. Non-adaptive streams (a Short's single-file fallback) have no clickable items to
     /// reach this with. A switch that lands mid-teardown/retry (Player null) is stored only —
-    /// the next PlayAsync's WriteManifestForHeight picks it up. Re-selecting the already-active
-    /// height is a no-op, so a stray click never re-triggers a reload.
+    /// the next PlayAsync's WriteManifestForHeight picks it up. The no-op check compares against
+    /// the RESOLVED rung (activeQuality), not the raw preference — a stale preference from a
+    /// taller video must not force a pointless reload when the clicked item is already what's
+    /// playing. Auto has no resolved height to compare, so it's a no-op only when already Auto.
     private void SetPreferredHeight(int? height)
     {
-        if (height == preferredHeight) return;
+        var isNoOp = height is { } wanted ? wanted == activeQuality?.Height : preferredHeight is null;
+        if (isNoOp) return;
         preferredHeight = height;
         if (hlsMaster is null || Player is null) return;
         ReloadAtCurrentQuality();
@@ -678,11 +696,14 @@ public sealed partial class PlayerPage : Page
     /// from the position it was just showing — mpv's own "loadfile ... replace" on the existing
     /// MpvPlayerHost, not a fresh host: Load() only builds native state when nothing has started
     /// yet, so this is cheap and keeps the render pipeline (and its cold-start race, see
-    /// CreatePlayerHost) out of a routine quality switch.
+    /// CreatePlayerHost) out of a routine quality switch. Before the first Opened of this
+    /// attempt lands, Player.Position is still 0 (mpv hasn't seeked yet) — hasPlayed gates
+    /// between that and the seeded lastKnownPosition, so a quality click hit during the loading
+    /// ring reloads at the real resume point instead of the start of the file.
     private void ReloadAtCurrentQuality()
     {
         if (hlsMaster is null || Player is not { } player) return;
-        var position = player.Position;
+        var position = hasPlayed ? player.Position : lastKnownPosition;
         var path = WriteManifestForHeight(preferredHeight);
         player.Load(path, position, lastUserAgent!, lastAudioLanguage);
         UpdateQualityLabel();
