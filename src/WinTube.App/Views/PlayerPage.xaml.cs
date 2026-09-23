@@ -138,6 +138,7 @@ public sealed partial class PlayerPage : Page
                 using var manifestRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(stream.Url.ToString()));
                 manifestRequest.Headers.TryAddWithoutValidation("User-Agent", stream.UserAgent);
                 var manifestResponse = await App.Http.SendAsync(manifestRequest);
+                manifestResponse.EnsureSuccessStatusCode();
                 master = await manifestResponse.Content.ReadAsStringAsync();
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
@@ -151,7 +152,23 @@ public sealed partial class PlayerPage : Page
             hlsMaster = master;
             hlsVariants = HlsVariantParser.Parse(master);
             hlsQualities = HlsVariantParser.QualityLevels(hlsVariants);
-            target = WriteManifestForHeight(preferredHeight);   // Task 8 fills the picker UI; the mechanism lands here
+            if (hlsQualities.Count == 0)
+            {
+                if (leftPage) return;
+                await RetryOrFailAsync("Manifest had no variants.");
+                return;
+            }
+
+            try
+            {
+                target = WriteManifestForHeight(preferredHeight);   // Task 8 fills the picker UI; the mechanism lands here
+            }
+            catch (IOException e)
+            {
+                if (leftPage) return;
+                await RetryOrFailAsync($"Manifest write failed: {e.Message}");
+                return;
+            }
             BuildQualityMenu();
         }
         else
@@ -169,8 +186,10 @@ public sealed partial class PlayerPage : Page
 
         hasPlayed = false;
         handledFailure = false;
+        // startAt is NOT cleared here — a ladder retry re-enters PlayAsync before the video has
+        // ever played, and must still resume at the original link timestamp, not recorded
+        // progress. It's cleared once, in Opened's first-play branch below.
         var resume = startAt?.TotalSeconds ?? App.Session.Progress.ResumePosition(video!.Id) ?? 0;
-        startAt = null;
         lastUserAgent = stream.UserAgent;
         lastAudioLanguage = stream.OriginalAudioLanguage;
 
@@ -178,8 +197,13 @@ public sealed partial class PlayerPage : Page
         Player!.Volume = App.Session.PlayerSettings.LoadVolume();
         Player.Load(target, resume, stream.UserAgent, stream.OriginalAudioLanguage);
 
+        // Backstop watchdog, not the primary failure signal — Errored (mpv's network-timeout
+        // fires it for a genuinely dead stream) is. This only catches a hang Errored never
+        // reports, so the window is wide: mpv has been observed taking 10-25s to reach
+        // FileLoaded on a slow-but-healthy manifest, and a watchdog that beats that tears down
+        // an open that was about to succeed and burns a ladder retry on nothing.
         stallTimer = dispatcher.CreateTimer();
-        stallTimer.Interval = TimeSpan.FromSeconds(10);
+        stallTimer.Interval = TimeSpan.FromSeconds(40);
         stallTimer.IsRepeating = false;
         stallTimer.Tick += (_, _) => { if (!hasPlayed) _ = RetryOrFailAsync("Playback did not start."); };
         stallTimer.Start();
@@ -223,6 +247,9 @@ public sealed partial class PlayerPage : Page
             HideOverlays();
             if (!hasPlayed)
             {
+                // Applied once — a ladder retry re-entering Opened after this must resume from
+                // recorded progress, not re-seek back to the original link timestamp.
+                startAt = null;
                 hasPlayed = true;
                 stallTimer?.Stop();
                 App.Session.History.Record(video!);

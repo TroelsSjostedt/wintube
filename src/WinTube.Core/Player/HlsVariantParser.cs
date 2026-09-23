@@ -85,22 +85,48 @@ public static partial class HlsVariantParser
     }
 
     /// Rewrites a master playlist to carry only the single STREAM-INF/URI pair whose
-    /// BANDWIDTH= attribute matches the target. Every non-STREAM-INF line passes through;
-    /// audio-only entries (which have no RESOLUTION) are filtered by the bandwidth check.
+    /// BANDWIDTH= attribute matches the target. Every non-STREAM-INF, non-EXT-X-MEDIA line
+    /// passes through; audio-only STREAM-INF entries (which have no RESOLUTION) are filtered
+    /// by the bandwidth check same as any other rung. EXT-X-MEDIA lines belonging to an audio
+    /// group other than the kept variant's own AUDIO="..." group are dropped too — mpv (ffmpeg)
+    /// otherwise probes every rendition in the master, including audio tracks nothing will ever
+    /// play, which is pure open-latency. A variant with no AUDIO attribute leaves every
+    /// EXT-X-MEDIA line untouched, since there's then nothing to match against.
     public static string FilterToBandwidth(string masterPlaylist, uint bandwidth)
     {
         var lines = masterPlaylist.Split('\n');
+
+        string? audioGroup = null;
+        foreach (var raw in lines)
+        {
+            var line = raw.TrimEnd('\r');
+            if (!line.StartsWith("#EXT-X-STREAM-INF:")) continue;
+            var bandwidthMatch = BandwidthPattern().Match(line);
+            if (!bandwidthMatch.Success || !uint.TryParse(bandwidthMatch.Groups[1].Value, out var bw) || bw != bandwidth) continue;
+            var audioMatch = AudioGroupPattern().Match(line);
+            if (audioMatch.Success) audioGroup = audioMatch.Groups[1].Value;
+            break;
+        }
+
         var kept = new List<string>(lines.Length);
         for (var i = 0; i < lines.Length; i++)
         {
             var line = lines[i].TrimEnd('\r');
+            if (line.StartsWith("#EXT-X-MEDIA:"))
+            {
+                var groupMatch = MediaGroupIdPattern().Match(line);
+                if (audioGroup is not null && groupMatch.Success && groupMatch.Groups[1].Value != audioGroup)
+                    continue;
+                kept.Add(line);
+                continue;
+            }
             if (!line.StartsWith("#EXT-X-STREAM-INF:"))
             {
                 kept.Add(line);
                 continue;
             }
-            var bandwidthMatch = BandwidthPattern().Match(line);
-            var keep = bandwidthMatch.Success && uint.TryParse(bandwidthMatch.Groups[1].Value, out var bw) && bw == bandwidth;
+            var bandwidthMatch2 = BandwidthPattern().Match(line);
+            var keep = bandwidthMatch2.Success && uint.TryParse(bandwidthMatch2.Groups[1].Value, out var bw2) && bw2 == bandwidth;
             if (keep) kept.Add(line);
             if (i + 1 < lines.Length)
             {
@@ -125,6 +151,12 @@ public static partial class HlsVariantParser
 
     [GeneratedRegex(@"BANDWIDTH=(\d+)")]
     private static partial Regex BandwidthPattern();
+
+    [GeneratedRegex("AUDIO=\"([^\"]*)\"")]
+    private static partial Regex AudioGroupPattern();
+
+    [GeneratedRegex("GROUP-ID=\"([^\"]*)\"")]
+    private static partial Regex MediaGroupIdPattern();
 
     [GeneratedRegex("CODECS=\"([^\"]*)\"")]
     private static partial Regex CodecsPattern();

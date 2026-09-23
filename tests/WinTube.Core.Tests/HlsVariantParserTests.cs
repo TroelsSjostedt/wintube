@@ -96,6 +96,25 @@ public class HlsVariantParserTests
     }
 
     [Fact]
+    public void FilterToBandwidth_DropsForeignAudioGroup_KeepsReferencedGroup()
+    {
+        const string text = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="en",NAME="English",URI="en.m3u8"
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="es",NAME="Spanish",URI="es.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=6321284,RESOLUTION=1920x1080,CODECS="avc1.64002A,mp4a.40.2",AUDIO="en"
+            v1080.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=300000,RESOLUTION=640x360,CODECS="avc1.4D401E,mp4a.40.2",AUDIO="es"
+            v360.m3u8
+            """;
+        var filtered = HlsVariantParser.FilterToBandwidth(text, 6321284);
+        Assert.Contains("GROUP-ID=\"en\"", filtered);
+        Assert.DoesNotContain("GROUP-ID=\"es\"", filtered);
+        Assert.Contains("v1080.m3u8", filtered);
+        Assert.DoesNotContain("v360.m3u8", filtered);
+    }
+
+    [Fact]
     public void AutoQuality_HighestAtOrBelowScreen()
     {
         var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(Manifest)); // 2160, 1080, 360

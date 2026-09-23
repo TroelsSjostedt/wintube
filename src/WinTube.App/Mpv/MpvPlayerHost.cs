@@ -64,6 +64,11 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     private double volume = 1.0, speed = 1.0;
     private bool eofReached; // edge-detects eof-reached false->true; event thread only
 
+    // Load->FileLoaded timing, logged on open so the stall-timer window can be tuned from real
+    // data instead of a guess; reset on every DoLoad, read from the event thread only.
+    private DateTimeOffset loadStartedAt;
+    private string loadKind = "";
+
     // Latest requested pixel size / DPI scale; the render thread applies it.
     private readonly object sizeGate = new();
     private int wantW, wantH;
@@ -190,10 +195,20 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     {
         MpvNative.SetOption(mpv, "user-agent", request.UserAgent);
         MpvNative.SetOption(mpv, "alang", request.AudioLanguage ?? "");
+        loadStartedAt = DateTimeOffset.UtcNow;
+        loadKind = ClassifyKind(request.UrlOrPath);
         // Per-load start= avoids seeking after open; pause=no clears a prior load's paused state.
         var options = FormattableString.Invariant($"start={request.StartAtSeconds:0.###},pause=no");
         Com.Check(MpvNative.Command(mpv, "loadfile", request.UrlOrPath, "replace", "0", options), "loadfile");
     }
+
+    /// Purely for the open-duration log line below: PlayerPage hands either a local manifest
+    /// path (adaptive) or a raw http(s) URL (muxed fallback) — distinguishing them is what makes
+    /// the logged durations comparable across runs.
+    private static string ClassifyKind(string urlOrPath) =>
+        urlOrPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+        urlOrPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            ? "direct" : "manifest";
 
     private void CreateMpv()
     {
@@ -203,6 +218,9 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         MpvNative.SetOption(mpv, "hwdec", "auto-safe");
         MpvNative.SetOption(mpv, "keep-open", "yes"); // EndReached fires but the last frame stays
         MpvNative.SetOption(mpv, "video-timing-offset", "0");
+        // A genuinely dead stream now fails through Errored well inside PlayerPage's stall
+        // watchdog, instead of the watchdog being the only thing that ever notices.
+        MpvNative.SetOption(mpv, "network-timeout", "20");
         MpvNative.SetOption(mpv, "terminal", "no");
         Com.Check(MpvNative.mpv_initialize(mpv), "mpv_initialize");
         MpvNative.SetPropertyDouble(mpv, "volume", volume * 100);
@@ -302,7 +320,10 @@ public sealed class MpvPlayerHost : Grid, IDisposable
                 {
                     case MpvNative.EventId.None: continue;
                     case MpvNative.EventId.Shutdown: return;
-                    case MpvNative.EventId.FileLoaded: Post(() => Opened?.Invoke()); break;
+                    case MpvNative.EventId.FileLoaded:
+                        Log(FormattableString.Invariant($"open: {(DateTimeOffset.UtcNow - loadStartedAt).TotalSeconds:F1}s {loadKind}"));
+                        Post(() => Opened?.Invoke());
+                        break;
                     case MpvNative.EventId.EndFile: HandleEndFile(ev); break;
                     case MpvNative.EventId.PropertyChange: HandlePropertyChange(ev); break;
                 }
