@@ -15,10 +15,11 @@ namespace WinTube.App.Mpv;
 /// without recreating the pipeline), Dispose when the page is done with it. Load before the
 /// control has laid out is deferred to Loaded, since the swap chain needs a real pixel size.
 ///
-/// Threading: UI thread owns device/swap-chain creation, mpv create/init/destroy and the public
-/// surface. A dedicated event thread drains mpv_wait_event and marshals everything user-visible
-/// through the DispatcherQueue captured at construction. A dedicated render thread owns every
-/// EGL/GL call and every use of the immediate D3D11 context. Neither background thread ever
+/// Threading: UI thread owns device/swap-chain creation, mpv create/init and the public surface.
+/// A dedicated event thread drains mpv_wait_event and marshals everything user-visible through
+/// the DispatcherQueue captured at construction. A dedicated render thread owns every EGL/GL call
+/// and every use of the immediate D3D11 context. Dispose only flags and detaches on the UI thread;
+/// the joins and mpv_terminate_destroy run on a teardown thread. No background thread ever
 /// touches XAML directly; events raised after Dispose are dropped.
 public sealed class MpvPlayerHost : Grid, IDisposable
 {
@@ -39,7 +40,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         set
         {
             volume = value;
-            if (mpv != IntPtr.Zero) MpvNative.SetPropertyDouble(mpv, "volume", value * 100);
+            if (Live) MpvNative.SetPropertyDouble(mpv, "volume", value * 100);
         }
     }
 
@@ -49,9 +50,13 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         set
         {
             speed = value;
-            if (mpv != IntPtr.Zero) MpvNative.SetPropertyDouble(mpv, "speed", value);
+            if (Live) MpvNative.SetPropertyDouble(mpv, "speed", value);
         }
     }
+
+    // Dispose hands the handle to the teardown thread, so the UI must stop using it the moment
+    // `disposed` is set, not when `mpv` is finally zeroed over there.
+    private bool Live => !disposed && mpv != IntPtr.Zero;
 
     private readonly SwapChainPanel panel;
     private readonly DispatcherQueue dispatcher;
@@ -113,13 +118,13 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         StartAndLoad(request);
     }
 
-    public void Play() { if (mpv != IntPtr.Zero) MpvNative.Command(mpv, "set", "pause", "no"); }
-    public void Pause() { if (mpv != IntPtr.Zero) MpvNative.Command(mpv, "set", "pause", "yes"); }
-    public void TogglePause() { if (mpv != IntPtr.Zero) MpvNative.Command(mpv, "cycle", "pause"); }
+    public void Play() { if (Live) MpvNative.Command(mpv, "set", "pause", "no"); }
+    public void Pause() { if (Live) MpvNative.Command(mpv, "set", "pause", "yes"); }
+    public void TogglePause() { if (Live) MpvNative.Command(mpv, "cycle", "pause"); }
 
     public void SeekTo(double seconds)
     {
-        if (mpv == IntPtr.Zero) return;
+        if (!Live) return;
         MpvNative.Command(mpv, "seek", seconds.ToString("0.###", CultureInfo.InvariantCulture), "absolute");
     }
 
@@ -174,7 +179,11 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     /// Cleans up whatever EnsureStarted managed to create before it threw, back to "nothing built
     /// yet". EnsureStarted only starts the event/render threads after CreateMpv succeeds, so a
     /// failure here never has a thread to join first.
-    private void TeardownFailedStart() => TeardownNativeState();
+    private void TeardownFailedStart()
+    {
+        DetachSwapChain();
+        TeardownNativeState();
+    }
 
     private void EnsureStarted()
     {
@@ -215,6 +224,11 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         mpv = MpvNative.mpv_create();
         if (mpv == IntPtr.Zero) throw new InvalidOperationException("mpv_create failed");
         MpvNative.SetOption(mpv, "vo", "libmpv"); // required for the render API
+        // Both load targets (HLS manifest, muxed MP4) are lavf's. Without this, a manifest lavf
+        // rejects (DRM, 403) falls through to mpv's other demuxers: the playlist demuxer turns it
+        // into a playlist of raw segment URLs, and a failed rewind during one of those probes
+        // closes a never-opened disc demuxer on a null priv — libmpv AV on the "opener" thread.
+        MpvNative.SetOption(mpv, "demuxer", "lavf");
         MpvNative.SetOption(mpv, "hwdec", "auto-safe");
         MpvNative.SetOption(mpv, "keep-open", "yes"); // EndReached fires but the last frame stays
         MpvNative.SetOption(mpv, "video-timing-offset", "0");
@@ -541,49 +555,71 @@ public sealed class MpvPlayerHost : Grid, IDisposable
 
     // MARK: dispose
 
+    /// Returns at once. The thread joins (up to 3 s each) plus mpv_terminate_destroy, which waits
+    /// on mpv's own demuxer/network shutdown with no bound, used to run here on the UI thread —
+    /// anything past 5 s there is a Windows "not responding" hang. They now run on a teardown
+    /// thread; nothing it touches is shared with a newer host.
     public void Dispose()
     {
         if (disposed) return;
         disposed = true;
-
-        if (mpv != IntPtr.Zero) MpvNative.mpv_wakeup(mpv);
-        var eventJoined = eventThread is null || eventThread.Join(3000);
-
-        wake.Set();
-        var renderJoined = renderThread is null || renderThread.Join(3000); // frees the render context on its own thread, per the recipe
-
         Loaded -= OnLoaded;
 
-        if (!eventJoined || !renderJoined)
-        {
-            // A wedged thread may still be inside mpv_wait_event / Present / mpv_render_context_render
-            // — still touching the mpv handle, the immediate D3D11 context, or the swap chain.
-            // Destroying/releasing any of them now would race that thread and crash the process.
-            // Leak instead: a wedged native thread was never coming back regardless, and a leak beats
-            // a use-after-free crash.
-            Log($"dispose: thread join timed out (event joined={eventJoined}, render joined={renderJoined}) — leaking native handles to avoid a use-after-free");
-            return;
-        }
+        if (eventThread is null && renderThread is null) return; // never started, or a failed start already tore down
 
-        TeardownNativeState();
+        DetachSwapChain();
+        new Thread(TeardownThreads) { IsBackground = true, Name = "mpv-teardown" }.Start();
     }
 
-    /// mpv_terminate_destroy, detach the swap chain, release the D3D11 objects. Only safe to call
-    /// once nothing else (in particular the render thread) can still be touching them — i.e. after
-    /// both threads have been confirmed joined, or before either was ever started.
+    private void TeardownThreads()
+    {
+        try
+        {
+            if (mpv != IntPtr.Zero) MpvNative.mpv_wakeup(mpv);
+            var eventJoined = eventThread is null || eventThread.Join(3000);
+
+            wake.Set();
+            var renderJoined = renderThread is null || renderThread.Join(3000); // frees the render context on its own thread, per the recipe
+
+            if (!eventJoined || !renderJoined)
+            {
+                // A wedged thread may still be inside mpv_wait_event / Present / mpv_render_context_render
+                // — still touching the mpv handle, the immediate D3D11 context, or the swap chain.
+                // Destroying/releasing any of them now would race that thread and crash the process.
+                // Leak instead: a wedged native thread was never coming back regardless, and a leak beats
+                // a use-after-free crash.
+                Log($"dispose: thread join timed out (event joined={eventJoined}, render joined={renderJoined}) — leaking native handles to avoid a use-after-free");
+                return;
+            }
+
+            TeardownNativeState();
+        }
+        catch (Exception ex)
+        {
+            Log($"dispose: teardown failed: {ex.Message}"); // an escaping exception here would end the process
+        }
+    }
+
+    /// UI thread only. Detach, or the panel keeps its own reference and shows the stale last frame.
+    /// Presenting into a swap chain no panel shows is legal, so the render thread may still be
+    /// mid-frame when this runs.
+    private void DetachSwapChain()
+    {
+        if (swapChain == IntPtr.Zero) return;
+        var panelNative = Com.QueryInterface(((WinRT.IWinRTObject)panel).NativeObject.ThisPtr, Com.IID_ISwapChainPanelNative);
+        Com.Slot<Com.SetSwapChainFn>(panelNative, 3)(panelNative, IntPtr.Zero);
+        Com.Release(panelNative);
+    }
+
+    /// mpv_terminate_destroy, release the D3D11 objects. Only safe to call once nothing else (in
+    /// particular the render thread) can still be touching them — i.e. after both threads have been
+    /// confirmed joined, or before either was ever started. Touches no XAML, so any thread may run it.
     private void TeardownNativeState()
     {
         if (mpv != IntPtr.Zero) MpvNative.mpv_terminate_destroy(mpv);
         mpv = IntPtr.Zero;
 
-        if (swapChain != IntPtr.Zero)
-        {
-            // Detach, or the panel keeps its own reference and shows the stale last frame.
-            var panelNative = Com.QueryInterface(((WinRT.IWinRTObject)panel).NativeObject.ThisPtr, Com.IID_ISwapChainPanelNative);
-            Com.Slot<Com.SetSwapChainFn>(panelNative, 3)(panelNative, IntPtr.Zero);
-            Com.Release(panelNative);
-            Com.Release(swapChain);
-        }
+        if (swapChain != IntPtr.Zero) Com.Release(swapChain);
         if (deviceContext != IntPtr.Zero) Com.Release(deviceContext);
         if (device != IntPtr.Zero)
         {
