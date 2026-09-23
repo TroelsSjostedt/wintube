@@ -26,6 +26,11 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.*" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
     <PackageReference Include="Velopack" Version="1.2.0" />
+    <!-- ANGLE (EGL on D3D11) for libmpv's render API; no download script needed. GeneratePathProperty
+         exposes PkgAvalonia_Angle_Windows_Natives below: this package has no build/buildTransitive
+         assets of its own, so plain `dotnet build` (no -r) never runs the RID-specific target that
+         would otherwise copy its runtimes/win-x64/native asset — verified empirically. -->
+    <PackageReference Include="Avalonia.Angle.Windows.Natives" Version="2.1.27548.20260419" GeneratePathProperty="true" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\WinTube.Core\WinTube.Core.csproj" />
@@ -33,10 +38,15 @@
   <ItemGroup>
     <!-- Copied beside the exe so MainWindow can hand the taskbar/title-bar icon to AppWindow. -->
     <Content Include="Assets\wintube.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Ships with the app: covers ANGLE (BSD-3) and libmpv (GPLv3-or-later). -->
+    <Content Include="..\..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <!-- Native playback engine, fetched by tools/get-libmpv.ps1 (pinned, gitignored). -->
     <Content Include="..\..\libs\mpv\libmpv-2.dll" Link="libmpv-2.dll" CopyToOutputDirectory="PreserveNewest" />
+    <!-- win-x64 native asset from the ANGLE package, copied explicitly (see PackageReference above). -->
+    <Content Include="$(PkgAvalonia_Angle_Windows_Natives)\runtimes\win-x64\native\av_libglesv2.dll"
+             Link="av_libglesv2.dll" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="EnsureLibMpv" BeforeTargets="PrepareForBuild">
     <!-- BeforeTargets="Build" fires too late: CoreBuild (which copies Content items)
