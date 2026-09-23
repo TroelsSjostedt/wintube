@@ -952,36 +952,23 @@ public sealed partial class PlayerPage : Page
     }
 
     /// Esc walks the panel back one level at a time: out of a replies view first, then closes
-    /// the panel entirely — matching tvOS. Wired to both PreviewKeyDown (seen regardless of
-    /// which child has focus) and KeyDown (belt-and-suspenders for focus landing on the page
-    /// itself); marking the preview pass handled suppresses the later bubbling KeyDown.
-    private void OnKeyDown(object sender, KeyRoutedEventArgs e)
+    /// the panel entirely — matching tvOS.
+    ///
+    /// Wired as a KeyboardAccelerator (Page.KeyboardAccelerators in XAML), not through
+    /// OnKeyDown's routed PreviewKeyDown/KeyDown like Space/Left/Right below: a routed KeyDown
+    /// tunnels from whichever element currently holds focus, and that tunnel was observed to
+    /// silently stop delivering events right after a double-click-triggered fullscreen toggle —
+    /// confirmed live that PlayerSlot legitimately held focus (FocusManager.GetFocusedElement
+    /// agreed) and the key still never reached OnKeyDown. A KeyboardAccelerator is scoped to the
+    /// XamlRoot instead of a specific focused element, and reliably fired in the same broken
+    /// state. Esc owns this accelerator exclusively — OnKeyDown has no Escape branch — so a
+    /// keypress is only ever handled once.
+    private void OnEscapeAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+        Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
     {
-        // No TextBox exists on this page today, so these never need to yield to text entry.
-        if (Player is { } p)
-        {
-            if (e.Key == Windows.System.VirtualKey.Space)
-            {
-                TogglePlayPause();
-                WakeTransport();
-                e.Handled = true;
-                return;
-            }
-            if (e.Key is Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right)
-            {
-                var delta = e.Key == Windows.System.VirtualKey.Left ? -10 : 10;
-                p.SeekTo(Math.Clamp(p.Position + delta, 0, p.Duration));
-                WakeTransport();
-                e.Handled = true;
-                return;
-            }
-        }
-
-        if (e.Key != Windows.System.VirtualKey.Escape) return;
-
+        args.Handled = true;
         if (CommentsPanel.Visibility == Visibility.Visible)
         {
-            e.Handled = true;
             if (repliesParent is not null) CloseReplies();
             else
             {
@@ -993,9 +980,29 @@ public sealed partial class PlayerPage : Page
 
         if (isFullScreen)
         {
-            e.Handled = true;
             isFullScreen = false;
             ApplyFullScreen();
+        }
+    }
+
+    private void OnKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        // No TextBox exists on this page today, so these never need to yield to text entry.
+        if (Player is not { } p) return;
+
+        if (e.Key == Windows.System.VirtualKey.Space)
+        {
+            TogglePlayPause();
+            WakeTransport();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key is Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right)
+        {
+            var delta = e.Key == Windows.System.VirtualKey.Left ? -10 : 10;
+            p.SeekTo(Math.Clamp(p.Position + delta, 0, p.Duration));
+            WakeTransport();
+            e.Handled = true;
         }
     }
 }
