@@ -275,6 +275,10 @@ public sealed partial class PlayerPage : Page
             if (leftPage || host != Player) return;
             HideOverlays();
             WakeTransport();
+            // The video surface is the page's only always-present, always-in-tree focus owner —
+            // without this, nothing holds keyboard focus after a fresh load and Space/Left/Right/
+            // Esc never tunnel to OnKeyDown at all (PlayerSlot is IsTabStop so this succeeds).
+            PlayerSlot.Focus(FocusState.Programmatic);
             if (!hasPlayed)
             {
                 // Applied once — a ladder retry re-entering Opened after this must resume from
@@ -616,6 +620,10 @@ public sealed partial class PlayerPage : Page
                 or Microsoft.UI.Xaml.Controls.Primitives.RangeBase) return;
         }
         TogglePlayPause();
+        // Reclaims focus for the video surface every tap — a tap that happens to land while some
+        // other control (e.g. a just-closed flyout's remnant) holds focus would otherwise leave
+        // keyboard shortcuts dead until the next click on an actual Control.
+        PlayerSlot.Focus(FocusState.Programmatic);
     }
 
     // MARK: channel link

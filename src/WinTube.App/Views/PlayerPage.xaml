@@ -43,7 +43,7 @@
         </Grid>
 
         <Grid x:Name="VideoGrid" Grid.Row="1">
-            <Grid x:Name="PlayerSlot" Tapped="OnPlayerTapped"/>
+            <Grid x:Name="PlayerSlot" Tapped="OnPlayerTapped" IsTabStop="True" UseSystemFocusVisuals="False"/>
 
             <Border x:Name="SkipToast" Visibility="Collapsed"
                     VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,120"
