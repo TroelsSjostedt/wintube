@@ -39,7 +39,10 @@ notepad $env:LOCALAPPDATA\WinTube\secrets.json
 
 ## Build, run, test
 
+Ensure 7-Zip is installed (`winget install 7zip.7zip`), then fetch libmpv once before building:
+
 ```powershell
+pwsh tools/get-libmpv.ps1
 dotnet build src/WinTube.App -p:Platform=x64
 .\src\WinTube.App\bin\x64\Debug\net8.0-windows10.0.19041.0\WinTube.App.exe
 # or, equivalently:
