@@ -100,6 +100,20 @@ public class HlsVariantParserTests
     }
 
     [Fact]
+    public void KeptVariantUriIsAbsoluteHttps_TrueOnlyForAbsoluteHttpsUri()
+    {
+        var httpsFiltered = HlsVariantParser.FilterToBandwidth(Manifest, 6321284);
+        Assert.True(HlsVariantParser.KeptVariantUriIsAbsoluteHttps(httpsFiltered.Replace("v1080-avc.m3u8", "https://example.com/v1080-avc.m3u8")));
+
+        // The real filtered output above keeps a bare relative filename (v1080-avc.m3u8) — mpv
+        // happens to be pointed at it via a co-located manifest, but a URI line that isn't an
+        // absolute https URL is exactly what M7 hardens against.
+        Assert.False(HlsVariantParser.KeptVariantUriIsAbsoluteHttps(httpsFiltered));
+        Assert.False(HlsVariantParser.KeptVariantUriIsAbsoluteHttps(httpsFiltered.Replace("v1080-avc.m3u8", "http://example.com/v1080-avc.m3u8")));
+        Assert.False(HlsVariantParser.KeptVariantUriIsAbsoluteHttps("#EXTM3U\nno stream inf here\n"));
+    }
+
+    [Fact]
     public void AutoQuality_HighestAtOrBelowScreen()
     {
         var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(Manifest)); // 2160, 1080, 360

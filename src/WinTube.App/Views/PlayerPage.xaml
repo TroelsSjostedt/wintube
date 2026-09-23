@@ -66,7 +66,7 @@
                 </Grid.RowDefinitions>
                 <Slider x:Name="SeekBar" Grid.Row="0" Minimum="0" StepFrequency="1"
                         ThumbToolTipValueConverter="{x:Null}"/>
-                <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto">
                     <Button x:Name="PlayPauseButton" Grid.Column="0" Click="OnPlayPauseClick"
                             Background="Transparent" BorderThickness="0">
                         <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE769;" FontSize="16"/>
@@ -82,11 +82,26 @@
                     </Button>
                     <TextBlock x:Name="TimeLabel" Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center"
                                FontSize="13" Text="0:00 / 0:00"/>
-                    <DropDownButton x:Name="SpeedButton" Grid.Column="4" Content="1×"
+                    <!-- I1: TitleRow (and the QualityButton/CommentsButton it carries) is Collapsed in
+                         fullscreen, so these two mirror it here — Visible only while isFullScreen,
+                         Collapsed otherwise (ApplyFullScreen/UpdateBarControlsVisibility). -->
+                    <DropDownButton x:Name="QualityButtonBar" Grid.Column="4" VerticalAlignment="Center"
+                                    Visibility="Collapsed" Background="Transparent" BorderThickness="0" Margin="0,0,4,0">
+                        <TextBlock x:Name="QualityLabelBar" Text="Auto"/>
+                        <DropDownButton.Flyout>
+                            <MenuFlyout x:Name="QualityFlyoutBar"/>
+                        </DropDownButton.Flyout>
+                    </DropDownButton>
+                    <ToggleButton x:Name="CommentsButtonBar" Grid.Column="5" Click="OnToggleComments"
+                                  Visibility="Collapsed" VerticalAlignment="Center"
+                                  Background="Transparent" BorderThickness="0" Margin="0,0,4,0">
+                        <FontIcon Glyph="&#xE90A;" FontSize="16"/>
+                    </ToggleButton>
+                    <DropDownButton x:Name="SpeedButton" Grid.Column="6" Content="1×"
                                     Background="Transparent" BorderThickness="0" Margin="0,0,4,0">
                         <DropDownButton.Flyout><MenuFlyout x:Name="SpeedFlyout"/></DropDownButton.Flyout>
                     </DropDownButton>
-                    <Button x:Name="FullScreenButton" Grid.Column="5" Click="OnFullScreenClick"
+                    <Button x:Name="FullScreenButton" Grid.Column="7" Click="OnFullScreenClick"
                             Background="Transparent" BorderThickness="0">
                         <FontIcon x:Name="FullScreenIcon" Glyph="&#xE740;" FontSize="16"/>
                     </Button>

@@ -20,8 +20,8 @@ namespace WinTube.App.Views;
 /// Full-window playback: resolves a stream for the navigated VideoItem, plays it with resume
 /// and periodic progress recording, and retries once up the client ladder if playback never
 /// starts. Ports the tvOS player contract onto MpvPlayerHost, the libmpv-backed control that
-/// replaced MediaPlayerElement; the source-building logic is exactly what SpikePage (Task 0)
-/// proved works against YouTube's HLS.
+/// replaced MediaPlayerElement; the source-building logic fetches YouTube's own HLS master
+/// playlist and hands mpv a single-variant manifest filtered out of it.
 public sealed partial class PlayerPage : Page
 {
     private readonly DispatcherQueue dispatcher = DispatcherQueue.GetForCurrentThread();
@@ -45,6 +45,17 @@ public sealed partial class PlayerPage : Page
     private bool hasPlayed;
     private bool handledFailure;
     private bool leftPage;
+    /// M4: armed whenever ReloadAtCurrentQuality starts a quality-switch stall watchdog, and
+    /// cleared the moment ANY Opened lands (host.Opened fires from a switch the same way it
+    /// does from a fresh load). Kept separate from hasPlayed, which stays true for the rest of
+    /// the video once the first attempt has ever opened and would otherwise never gate a later
+    /// switch's own watchdog.
+    private bool reloadArmed;
+    /// M5: set by ReloadAtCurrentQuality when the host was paused right before the switch.
+    /// DoLoad always issues pause=no, so re-pausing has to wait for the reload's own Opened —
+    /// issuing Pause() immediately after Load() would race mpv's command queue against that
+    /// same pause=no. Consumed (and cleared) the moment that Opened lands.
+    private bool pauseAfterReload;
 
     // MARK: quality picker state
     private string? hlsMaster;
@@ -86,6 +97,11 @@ public sealed partial class PlayerPage : Page
     private RadioMenuFlyoutItem? speedOneItem;
     private static readonly double[] SpeedOptions = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
     private bool isFullScreen;
+    /// M3: the session's own chosen speed, independent of any one MpvPlayerHost instance —
+    /// CreatePlayerHost builds a fresh host (speed defaults to 1x) on every ladder retry, so
+    /// PlayAsync re-applies this after each Load rather than trusting the new host to already
+    /// match whatever the (unchanged) SpeedButton/menu are still showing.
+    private double chosenSpeed = 1.0;
 
     public PlayerPage()
     {
@@ -116,6 +132,7 @@ public sealed partial class PlayerPage : Page
         // need to catch up to that.
         SpeedButton.Content = "1×";
         if (speedOneItem is not null) speedOneItem.IsChecked = true;
+        chosenSpeed = 1.0;
 
         leftPage = false;
         retried = false;
@@ -169,6 +186,12 @@ public sealed partial class PlayerPage : Page
 
     private async Task PlayAsync(ResolvedStream stream)
     {
+        // M1: reset here, before any of the early manifest-step failures below can call
+        // RetryOrFailAsync — resetting it only after those steps (as this used to) left a
+        // second attempt's own early failure hitting RetryOrFailAsync's `handledFailure`
+        // early-return, which skipped TearDownPlayer/ShowError and left the spinner forever.
+        handledFailure = false;
+
         // Resolved and seeded into lastKnownPosition before BuildQualityMenu can make the picker
         // clickable below — a quality switch during the loading ring, before this attempt's own
         // Opened has landed, must reload at the real resume point, not 0. startAt is NOT cleared
@@ -210,7 +233,15 @@ public sealed partial class PlayerPage : Page
 
             try
             {
-                target = WriteManifestForHeight(preferredHeight);   // Task 8 fills the picker UI; the mechanism lands here
+                // preferredHeight comes from the quality picker (BuildQualityMenu, below);
+                // null means Auto.
+                target = WriteManifestForHeight(preferredHeight);
+            }
+            catch (InvalidManifestVariantException e)
+            {
+                if (leftPage) return;
+                await RetryOrFailAsync(e.Message);
+                return;
             }
             catch (IOException e)
             {
@@ -229,12 +260,16 @@ public sealed partial class PlayerPage : Page
             activeQuality = null;
             target = stream.Url.ToString();
             QualityLabel.Text = "360p";
+            QualityLabelBar.Text = "360p";
             QualityButton.IsEnabled = false;
             QualityButton.Visibility = Visibility.Visible;
+            QualityButtonBar.IsEnabled = false;
+            QualityFlyout.Items.Clear();
+            QualityFlyoutBar.Items.Clear();
+            UpdateBarControlsVisibility();
         }
 
         hasPlayed = false;
-        handledFailure = false;
         lastUserAgent = stream.UserAgent;
         lastAudioLanguage = stream.OriginalAudioLanguage;
 
@@ -248,6 +283,9 @@ public sealed partial class PlayerPage : Page
         // the event when the new value equals whatever it already held (e.g. a fresh 0-default
         // slider loading a 0 persisted volume), which would otherwise leave the icon stale.
         UpdateVolumeIcon(volumePercent);
+        // M3: a fresh MpvPlayerHost always starts at speed 1x — re-apply the session's chosen
+        // speed so a ladder retry's new host matches what SpeedButton/the menu are still showing.
+        Player.Speed = chosenSpeed;
         Player.Load(target, resume, stream.UserAgent, stream.OriginalAudioLanguage);
 
         // Backstop watchdog, not the primary failure signal — Errored (mpv's network-timeout
@@ -270,12 +308,18 @@ public sealed partial class PlayerPage : Page
             : HlsVariantParser.AutoQuality(hlsQualities, ScreenHeight())!;
 
     /// mpv reads manifests from disk happily; one scratch file per page, overwritten per load.
+    /// M7: the filtered manifest's kept variant is checked before it ever reaches disk — a
+    /// relative path or non-https URI there is a manifest bug (or worse) worth failing loudly
+    /// on rather than silently handing mpv something it may resolve unexpectedly.
     private string WriteManifestForHeight(int? height)
     {
         var quality = ResolveQuality(height);
         activeQuality = quality;
+        var filtered = HlsVariantParser.FilterToBandwidth(hlsMaster!, quality.Bandwidth);
+        if (!HlsVariantParser.KeptVariantUriIsAbsoluteHttps(filtered))
+            throw new InvalidManifestVariantException();
         var path = Path.Combine(Session.DataDirectory, "current.m3u8");
-        File.WriteAllText(path, HlsVariantParser.FilterToBandwidth(hlsMaster!, quality.Bandwidth));
+        File.WriteAllText(path, filtered);
         return path;
     }
 
@@ -305,23 +349,33 @@ public sealed partial class PlayerPage : Page
             HideOverlays();
             WakeTransport();
             // The video surface is the page's only always-present, always-in-tree focus owner —
-            // without this, nothing holds keyboard focus after a fresh load and Space/Left/Right/
-            // Esc never tunnel to OnKeyDown at all (PlayerSlot is IsTabStop so this succeeds).
+            // without this, nothing holds keyboard focus after a fresh load (PlayerSlot is
+            // IsTabStop so this succeeds).
             PlayerSlot.Focus(FocusState.Programmatic);
             // DoLoad always issues pause=no, so a fresh open is always playing — set the icon
             // directly rather than waiting on the first "pause" property-change event, which may
             // not have arrived yet.
             PlayPauseIcon.Glyph = "";
+            // M4: stops both this attempt's own stall watchdog AND a quality switch's — whichever
+            // of the two is currently running is whatever this Opened belongs to.
+            reloadArmed = false;
+            stallTimer?.Stop();
             if (!hasPlayed)
             {
                 // Applied once — a ladder retry re-entering Opened after this must resume from
                 // recorded progress, not re-seek back to the original link timestamp.
                 startAt = null;
                 hasPlayed = true;
-                stallTimer?.Stop();
                 App.Session.History.Record(video!);
                 StartProgressTimer();
                 _ = LoadSponsorSegmentsAsync();
+            }
+            // M5: DoLoad's pause=no has already landed by the time Opened fires, so re-pausing
+            // here (rather than right after Load()) can't race mpv's own command queue.
+            if (pauseAfterReload)
+            {
+                pauseAfterReload = false;
+                host.Pause();
             }
         };
         host.PositionChanged += _ => { if (host == Player) { OnPlayerPosition(); UpdateTransport(); } };
@@ -441,6 +495,7 @@ public sealed partial class PlayerPage : Page
             var item = new RadioMenuFlyoutItem { Text = $"{value:0.##}×", GroupName = "speed", IsChecked = value == 1 };
             item.Click += (_, _) =>
             {
+                chosenSpeed = value;
                 if (Player is { } p) p.Speed = value;
                 SpeedButton.Content = $"{value:0.##}×";
             };
@@ -482,8 +537,23 @@ public sealed partial class PlayerPage : Page
     {
         App.Window!.SetPlayerFullScreen(isFullScreen);
         TitleRow.Visibility = isFullScreen ? Visibility.Collapsed : Visibility.Visible;
+        // I1: TitleRow (and the QualityButton/CommentsButton it carries) just went away, or came
+        // back — the transport bar's own copies mirror that.
+        UpdateBarControlsVisibility();
         FullScreenIcon.Glyph = isFullScreen ? "" : "";
         WakeTransport();
+    }
+
+    /// I1: decides whether the transport bar's Quality/Comments controls show at all — they
+    /// exist only so those two stay reachable while fullscreen has collapsed TitleRow, so they
+    /// track isFullScreen (and, for Quality, whatever the title row's own button is currently
+    /// showing — QualityButton.Visibility is Visible once a stream has resolved, Collapsed
+    /// before that).
+    private void UpdateBarControlsVisibility()
+    {
+        QualityButtonBar.Visibility = isFullScreen && QualityButton.Visibility == Visibility.Visible
+            ? Visibility.Visible : Visibility.Collapsed;
+        CommentsButtonBar.Visibility = isFullScreen ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnTransportEntered(object sender, PointerRoutedEventArgs e) => transportPointerOverBar = true;
@@ -651,14 +721,32 @@ public sealed partial class PlayerPage : Page
     // MARK: quality picker
 
     /// Builds the picker from the filtered manifest's rungs: Auto plus one entry per height.
+    /// I1: populates BOTH the title row's QualityFlyout and the transport bar's QualityFlyoutBar
+    /// through the same PopulateQualityFlyout routine, so the fullscreen-only bar copy (RULING:
+    /// visible only while isFullScreen, since TitleRow — and the flyout's usual home — is
+    /// Collapsed there) never drifts from the title row's.
     private void BuildQualityMenu()
     {
         if (hlsQualities.Count == 0) return;
 
-        QualityFlyout.Items.Clear();
+        QualityButton.IsEnabled = true;
+        QualityButton.Visibility = Visibility.Visible;
+        QualityButtonBar.IsEnabled = true;
+        UpdateQualityLabel(); // also (re)populates both flyouts
+        UpdateBarControlsVisibility();
+    }
+
+    /// Shared menu-building path for QualityFlyout (title row) and QualityFlyoutBar (transport
+    /// bar, I1) — same items, same click handler, rebuilt together on every label update so a
+    /// pick made through one flyout is reflected as checked in the other the next time it opens
+    /// (the two are independent RadioMenuFlyoutItem groups since they're separate MenuFlyouts,
+    /// so nothing else keeps them in sync).
+    private void PopulateQualityFlyout(MenuFlyout flyout)
+    {
+        flyout.Items.Clear();
         var auto = new RadioMenuFlyoutItem { Text = "Auto", GroupName = "quality", IsChecked = preferredHeight is null };
         auto.Click += (_, _) => SetPreferredHeight(null);
-        QualityFlyout.Items.Add(auto);
+        flyout.Items.Add(auto);
         foreach (var quality in hlsQualities)
         {
             var item = new RadioMenuFlyoutItem
@@ -673,12 +761,8 @@ public sealed partial class PlayerPage : Page
             };
             var height = quality.Height;
             item.Click += (_, _) => SetPreferredHeight(height);
-            QualityFlyout.Items.Add(item);
+            flyout.Items.Add(item);
         }
-
-        QualityButton.IsEnabled = true;
-        QualityButton.Visibility = Visibility.Visible;
-        UpdateQualityLabel();
     }
 
     /// Mode (Auto vs a manual pin) and playback are independent, so the stored choice always
@@ -706,15 +790,51 @@ public sealed partial class PlayerPage : Page
     /// from the position it was just showing — mpv's own "loadfile ... replace" on the existing
     /// MpvPlayerHost, not a fresh host: Load() only builds native state when nothing has started
     /// yet, so this is cheap and keeps the render pipeline (and its cold-start race, see
-    /// CreatePlayerHost) out of a routine quality switch. Before the first Opened of this
-    /// attempt lands, Player.Position is still 0 (mpv hasn't seeked yet) — hasPlayed gates
+    /// MpvPlayerHost.OnRenderReady) out of a routine quality switch. Before the first Opened of
+    /// this attempt lands, Player.Position is still 0 (mpv hasn't seeked yet) — hasPlayed gates
     /// between that and the seeded lastKnownPosition, so a quality click hit during the loading
     /// ring reloads at the real resume point instead of the start of the file.
+    ///
+    /// M2: WriteManifestForHeight touches disk (and now, M7, validates the kept variant's URI)
+    /// on every call, not just the first — an IOException/UnauthorizedAccessException or an
+    /// InvalidManifestVariantException from a menu click is routed through RetryOrFailAsync
+    /// like any other failed attempt, instead of escaping the click handler and killing the
+    /// process. M4: restarts the stall watchdog, stopping the prior one first — which also
+    /// covers a switch clicked mid-open, since the original attempt's own timer never gets a
+    /// chance to fire once this one replaces it. M5: captures IsPaused before the reload and
+    /// hands it to host.Opened (see CreatePlayerHost) to re-apply once the new file is actually
+    /// open, since DoLoad always issues pause=no and re-pausing here would race that.
     private void ReloadAtCurrentQuality()
     {
         if (hlsMaster is null || Player is not { } player) return;
         var position = hasPlayed ? player.Position : lastKnownPosition;
-        var path = WriteManifestForHeight(preferredHeight);
+        var wasPaused = player.IsPaused;
+
+        string path;
+        try
+        {
+            path = WriteManifestForHeight(preferredHeight);
+        }
+        catch (InvalidManifestVariantException e)
+        {
+            _ = RetryOrFailAsync(e.Message);
+            return;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _ = RetryOrFailAsync($"Manifest write failed: {e.Message}");
+            return;
+        }
+
+        stallTimer?.Stop();
+        reloadArmed = true;
+        stallTimer = dispatcher.CreateTimer();
+        stallTimer.Interval = TimeSpan.FromSeconds(40);
+        stallTimer.IsRepeating = false;
+        stallTimer.Tick += (_, _) => { if (reloadArmed) _ = RetryOrFailAsync("Quality switch did not complete."); };
+        stallTimer.Start();
+
+        pauseAfterReload = wasPaused;
         player.Load(path, position, lastUserAgent!, lastAudioLanguage);
         UpdateQualityLabel();
     }
@@ -722,11 +842,15 @@ public sealed partial class PlayerPage : Page
     private void UpdateQualityLabel()
     {
         if (activeQuality is not { } quality) return;
-        QualityLabel.Text = preferredHeight is null ? $"Auto · {quality.Height}p" : quality.Label;
+        var text = preferredHeight is null ? $"Auto · {quality.Height}p" : quality.Label;
+        QualityLabel.Text = text;
+        QualityLabelBar.Text = text;
+        PopulateQualityFlyout(QualityFlyout);
+        PopulateQualityFlyout(QualityFlyoutBar);
     }
 
     /// Clicking the video surface toggles play/pause. Tapped bubbles up from the transport
-    /// controls too (Task 6), and their invisible root layout spans the full frame — so instead
+    /// controls too, and their invisible root layout spans the full frame — so instead
     /// of fencing off the controls as a region, only a tap that actually landed on an
     /// interactive control (a button, a slider) is left alone.
     private void OnPlayerTapped(object sender, TappedRoutedEventArgs e)
@@ -809,23 +933,31 @@ public sealed partial class PlayerPage : Page
         CommentsStatus.Visibility = Visibility.Collapsed;
         CommentsRetry.Visibility = Visibility.Collapsed;
         CommentsPanel.Visibility = Visibility.Collapsed;
-        CommentsButton.IsChecked = false;
+        SetCommentsChecked(false);
     }
 
+    /// I1: shared by CommentsButton (title row) and CommentsButtonBar (transport bar, fullscreen
+    /// only) — either one opens/closes the same panel, so both must show the same toggled state.
     private void OnToggleComments(object sender, RoutedEventArgs e)
     {
         if (CommentsPanel.Visibility == Visibility.Visible)
         {
             CommentsPanel.Visibility = Visibility.Collapsed;
-            CommentsButton.IsChecked = false;
+            SetCommentsChecked(false);
             return;
         }
 
         CommentsPanel.Visibility = Visibility.Visible;
-        CommentsButton.IsChecked = true;
+        SetCommentsChecked(true);
         if (commentsLoaded) return;
         commentsLoaded = true;
         _ = LoadTopLevelAsync();
+    }
+
+    private void SetCommentsChecked(bool value)
+    {
+        CommentsButton.IsChecked = value;
+        CommentsButtonBar.IsChecked = value;
     }
 
     /// A tap that lands inside the panel (including empty space below the list) must never
@@ -1026,7 +1158,7 @@ public sealed partial class PlayerPage : Page
             else
             {
                 CommentsPanel.Visibility = Visibility.Collapsed;
-                CommentsButton.IsChecked = false;
+                SetCommentsChecked(false);
             }
             return;
         }
@@ -1060,6 +1192,12 @@ public sealed partial class PlayerPage : Page
         p.SeekTo(Math.Clamp(p.Position + deltaSeconds, 0, p.Duration));
         WakeTransport();
     }
+
+    /// M7: distinguishes "the filtered manifest's kept variant URI isn't absolute https" from
+    /// an actual disk I/O failure, so WriteManifestForHeight's two callers can each report the
+    /// exact reason instead of it arriving wrapped as "Manifest write failed: ...".
+    private sealed class InvalidManifestVariantException()
+        : Exception("Manifest variant URI not absolute https.");
 }
 
 /// Mutable per-row state for one comments-panel entry: a normal comment/reply row, the pinned

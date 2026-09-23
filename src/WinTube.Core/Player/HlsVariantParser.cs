@@ -114,6 +114,27 @@ public static partial class HlsVariantParser
     public static HlsQuality? AutoQuality(IReadOnlyList<HlsQuality> qualities, int maxHeight) =>
         qualities.FirstOrDefault(q => q.Height <= maxHeight) ?? qualities.LastOrDefault();
 
+    /// True only when the single surviving STREAM-INF pair's URI line (the very next line, as
+    /// FilterToBandwidth writes it) parses as an absolute https URL. Cheap hardening against a
+    /// manifest whose kept variant points at a relative path or a non-https scheme — mpv should
+    /// never be handed either, so a caller treats false the same as an empty manifest and fails
+    /// the attempt rather than loading it. False (not an exception) for a filtered playlist with
+    /// no surviving STREAM-INF line at all, which callers won't normally produce but this still
+    /// answers safely for.
+    public static bool KeptVariantUriIsAbsoluteHttps(string filteredPlaylist)
+    {
+        var lines = filteredPlaylist.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].TrimEnd('\r');
+            if (!line.StartsWith("#EXT-X-STREAM-INF:")) continue;
+            if (i + 1 >= lines.Length) return false;
+            var uri = lines[i + 1].TrimEnd('\r');
+            return Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && parsed.Scheme == Uri.UriSchemeHttps;
+        }
+        return false;
+    }
+
     [GeneratedRegex(@"#EXT-X-STREAM-INF:([^\r\n]*)")]
     private static partial Regex StreamInfPattern();
 

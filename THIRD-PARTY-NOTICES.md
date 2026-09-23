@@ -45,11 +45,29 @@ ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 ```
 
+## FFmpeg (statically bundled inside libmpv-2.dll)
+
+libmpv statically links [FFmpeg](https://ffmpeg.org/) for demuxing, decoding and the HLS
+handling WinTube's adaptive playback depends on; no separate FFmpeg binary is distributed —
+it ships only as part of libmpv-2.dll (see the pinned build below). FFmpeg's own license
+terms: https://ffmpeg.org/legal.html. The build WinTube pins includes LGPL- and
+GPL-licensed FFmpeg components, which is what makes the libmpv build below GPL as a whole
+(see next section).
+
 ## libmpv (libmpv-2.dll)
 
-Fetched by `tools/get-libmpv.ps1` from the
-[zhongfly/mpv-winbuild](https://github.com/zhongfly/mpv-winbuild) project (an unofficial Windows
-build of [mpv](https://mpv.io/)). Used as WinTube's playback engine.
+Fetched by `tools/get-libmpv.ps1` from the exact pinned release of
+[zhongfly/mpv-winbuild](https://github.com/zhongfly/mpv-winbuild) (an unofficial Windows build
+of [mpv](https://mpv.io/)) that WinTube ships:
 
-License: GPL v3-or-later (mpv's default build license). See the
+- Release tag: [`2026-09-22-c646756799`](https://github.com/zhongfly/mpv-winbuild/releases/tag/2026-09-22-c646756799)
+- Asset: `mpv-dev-x86_64-20260922-git-c646756799.7z`
+- Source: built from [mpv-player/mpv](https://github.com/mpv-player/mpv) commit `c646756799`
+
+Used as WinTube's playback engine.
+
+License: GPL v3-or-later (mpv's default build license, a consequence of the GPL FFmpeg
+components it links — see the FFmpeg section above). Every other library this build statically
+bundles (libass, libplacebo, and the rest of mpv-winbuild's dependency set) is covered by that
+release's own distribution and license terms, not restated here individually. See the
 [mpv project](https://github.com/mpv-player/mpv) for full license terms and source.

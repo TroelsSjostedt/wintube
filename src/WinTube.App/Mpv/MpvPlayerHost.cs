@@ -8,8 +8,10 @@ using Microsoft.UI.Xaml.Controls;
 namespace WinTube.App.Mpv;
 
 /// Owns one libmpv instance end to end: the D3D11 device, the composition swap chain attached to
-/// a child SwapChainPanel, the render-API/ANGLE pipeline, and the property/event plumbing. Built
-/// from the proven recipe in SpikePage/task-0b (render API, not child-HWND).
+/// a child SwapChainPanel, the render-API/ANGLE pipeline, and the property/event plumbing. Uses
+/// mpv's render API rather than a child HWND: a composition SwapChainPanel has no HWND of its
+/// own for mpv to draw into directly, so rendering has to go through EGL/ANGLE onto a D3D11
+/// texture this class owns instead.
 ///
 /// Lifecycle: construct, add to the visual tree, call Load (may be called again for a new video
 /// without recreating the pipeline), Dispose when the page is done with it. Load before the
