@@ -27,6 +27,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
 
     public event Action? Opened;
     public event Action<double>? PositionChanged;
+    public event Action<bool>? PausedChanged;
     public event Action? EndReached;
     public event Action<string>? Errored;
 
@@ -379,7 +380,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
                 break;
             case PauseUserdata when prop.Format == MpvNative.FormatFlag:
                 var paused = Marshal.ReadInt32(prop.Data) != 0;
-                Post(() => IsPaused = paused);
+                Post(() => { IsPaused = paused; PausedChanged?.Invoke(paused); });
                 break;
             case EofUserdata when prop.Format == MpvNative.FormatFlag:
                 var eof = Marshal.ReadInt32(prop.Data) != 0;

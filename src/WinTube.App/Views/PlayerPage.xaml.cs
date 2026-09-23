@@ -223,7 +223,12 @@ public sealed partial class PlayerPage : Page
         Player!.Volume = App.Session.PlayerSettings.LoadVolume();
         // Fires OnVolumeSliderChanged, which re-applies the same volume and re-saves it —
         // harmless, and the simplest way to keep the slider and the host in sync on every load.
-        VolumeSlider.Value = Player.Volume * 100;
+        var volumePercent = Player.Volume * 100;
+        VolumeSlider.Value = volumePercent;
+        // Explicit, not just relying on the ValueChanged side effect above — Slider suppresses
+        // the event when the new value equals whatever it already held (e.g. a fresh 0-default
+        // slider loading a 0 persisted volume), which would otherwise leave the icon stale.
+        UpdateVolumeIcon(volumePercent);
         Player.Load(target, resume, stream.UserAgent, stream.OriginalAudioLanguage);
 
         // Backstop watchdog, not the primary failure signal — Errored (mpv's network-timeout
@@ -279,6 +284,10 @@ public sealed partial class PlayerPage : Page
             // without this, nothing holds keyboard focus after a fresh load and Space/Left/Right/
             // Esc never tunnel to OnKeyDown at all (PlayerSlot is IsTabStop so this succeeds).
             PlayerSlot.Focus(FocusState.Programmatic);
+            // DoLoad always issues pause=no, so a fresh open is always playing — set the icon
+            // directly rather than waiting on the first "pause" property-change event, which may
+            // not have arrived yet.
+            PlayPauseIcon.Glyph = "";
             if (!hasPlayed)
             {
                 // Applied once — a ladder retry re-entering Opened after this must resume from
@@ -292,6 +301,10 @@ public sealed partial class PlayerPage : Page
             }
         };
         host.PositionChanged += _ => { if (host == Player) { OnPlayerPosition(); UpdateTransport(); } };
+        // time-pos stops ticking the instant playback pauses, so UpdateTransport (driven off
+        // PositionChanged) can't be trusted to refresh the play/pause icon — mpv's own "pause"
+        // property change is the live signal instead.
+        host.PausedChanged += paused => { if (host == Player) PlayPauseIcon.Glyph = paused ? "" : ""; };
         host.EndReached += () => { if (host == Player) ReportProgressOnce(); };
         host.Errored += message => { if (!leftPage && host == Player) _ = RetryOrFailAsync(message); };
 
@@ -329,12 +342,14 @@ public sealed partial class PlayerPage : Page
         WakeTransport();
     }
 
-    /// Player.PositionChanged-driven — refreshes the icon, the time label, and (unless the user
-    /// is mid-drag) the seek bar's position every time mpv reports a new time-pos.
+    /// Player.PositionChanged-driven — refreshes the time label and (unless the user is
+    /// mid-drag) the seek bar's position every time mpv reports a new time-pos.
     private void UpdateTransport()
     {
         if (Player is not { } p) return;
-        PlayPauseIcon.Glyph = p.IsPaused ? "" : "";
+        // PlayPauseIcon is NOT set here — time-pos (this method's trigger, PositionChanged) stops
+        // ticking the instant playback pauses, so the icon would freeze. MpvPlayerHost.PausedChanged
+        // (wired in CreatePlayerHost) drives it live instead.
         TimeLabel.Text = $"{Fmt(p.Position, p.Duration)} / {Fmt(p.Duration, p.Duration)}";
         if (!seekBarHeld)
         {
@@ -370,10 +385,21 @@ public sealed partial class PlayerPage : Page
         var newVolume = e.NewValue / 100;
         if (Player is { } p) p.Volume = newVolume;
         pendingVolume = newVolume;
+        UpdateVolumeIcon(e.NewValue);
         volumeSaveTimer ??= CreateVolumeSaveTimer();
         volumeSaveTimer.Stop();
         volumeSaveTimer.Start();
     }
+
+    /// percent is 0..100, matching VolumeSlider's own range — mute, then three roughly-even
+    /// bands, the standard Segoe Fluent glyph set for a volume control.
+    private void UpdateVolumeIcon(double percent) => VolumeIcon.Glyph = percent switch
+    {
+        <= 0 => "",
+        < 33 => "",
+        < 66 => "",
+        _ => "",
+    };
 
     private DispatcherQueueTimer CreateVolumeSaveTimer()
     {
