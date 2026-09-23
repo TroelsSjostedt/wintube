@@ -79,6 +79,7 @@ public sealed partial class PlayerPage : Page
     private bool transportPointerOverBar;
     private RadioMenuFlyoutItem? speedOneItem;
     private static readonly double[] SpeedOptions = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+    private bool isFullScreen;
 
     public PlayerPage()
     {
@@ -121,6 +122,13 @@ public sealed partial class PlayerPage : Page
     {
         base.OnNavigatedFrom(e);
         leftPage = true;
+        // Leaving the page while fullscreen must restore the window — nothing else undoes the
+        // presenter flip once the player content is gone.
+        if (isFullScreen)
+        {
+            isFullScreen = false;
+            App.Window!.SetPlayerFullScreen(false);
+        }
         ReportProgressOnce();
         App.Session.ProgressSync?.FlushNow();
         TearDownPlayer();
@@ -425,7 +433,42 @@ public sealed partial class PlayerPage : Page
         }
     }
 
-    private void OnFullScreenClick(object sender, RoutedEventArgs e) { } // Task 7 fills this in
+    private void OnFullScreenClick(object sender, RoutedEventArgs e)
+    {
+        isFullScreen = !isFullScreen;
+        ApplyFullScreen();
+    }
+
+    /// Same ButtonBase/RangeBase ancestor guard as OnPlayerTapped, so a double-click on an
+    /// actual control (e.g. double-clicking the play button) never toggles fullscreen. The
+    /// gesture already fired a single Tapped first, which flipped play/pause — that flip is
+    /// undone here rather than reworked with a click-delay timer, so a double-click always
+    /// leaves playback exactly as it was and only changes fullscreen.
+    private void OnPlayerDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if (Player is null) return;
+        for (var element = e.OriginalSource as DependencyObject; element is not null;
+             element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element))
+        {
+            if (element is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase
+                or Microsoft.UI.Xaml.Controls.Primitives.RangeBase) return;
+        }
+        TogglePlayPause();
+        isFullScreen = !isFullScreen;
+        ApplyFullScreen();
+        PlayerSlot.Focus(FocusState.Programmatic);
+    }
+
+    /// Pushes isFullScreen out to the window presenter/shell chrome, the title row (video-only
+    /// in fullscreen), and the button's own glyph. The single place both the button and the
+    /// double-click gesture funnel through.
+    private void ApplyFullScreen()
+    {
+        App.Window!.SetPlayerFullScreen(isFullScreen);
+        TitleRow.Visibility = isFullScreen ? Visibility.Collapsed : Visibility.Visible;
+        FullScreenIcon.Glyph = isFullScreen ? "" : "";
+        WakeTransport();
+    }
 
     private void OnTransportEntered(object sender, PointerRoutedEventArgs e) => transportPointerOverBar = true;
 
@@ -934,13 +977,25 @@ public sealed partial class PlayerPage : Page
             }
         }
 
-        if (e.Key != Windows.System.VirtualKey.Escape || CommentsPanel.Visibility != Visibility.Visible) return;
-        e.Handled = true;
-        if (repliesParent is not null) CloseReplies();
-        else
+        if (e.Key != Windows.System.VirtualKey.Escape) return;
+
+        if (CommentsPanel.Visibility == Visibility.Visible)
         {
-            CommentsPanel.Visibility = Visibility.Collapsed;
-            CommentsButton.IsChecked = false;
+            e.Handled = true;
+            if (repliesParent is not null) CloseReplies();
+            else
+            {
+                CommentsPanel.Visibility = Visibility.Collapsed;
+                CommentsButton.IsChecked = false;
+            }
+            return;
+        }
+
+        if (isFullScreen)
+        {
+            e.Handled = true;
+            isFullScreen = false;
+            ApplyFullScreen();
         }
     }
 }

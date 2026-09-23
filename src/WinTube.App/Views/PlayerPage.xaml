@@ -5,7 +5,7 @@
     xmlns:local="using:WinTube.App.Views"
     KeyDown="OnKeyDown" PreviewKeyDown="OnKeyDown">
     <Grid RowDefinitions="Auto,*" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
-        <Grid Grid.Row="0" Padding="12,8" ColumnDefinitions="*,Auto">
+        <Grid x:Name="TitleRow" Grid.Row="0" Padding="12,8" ColumnDefinitions="*,Auto">
             <StackPanel Grid.Column="0" Margin="4,0,0,0" VerticalAlignment="Center">
                 <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis"
                            Style="{StaticResource SubtitleTextBlockStyle}"/>
@@ -43,7 +43,8 @@
         </Grid>
 
         <Grid x:Name="VideoGrid" Grid.Row="1">
-            <Grid x:Name="PlayerSlot" Tapped="OnPlayerTapped" IsTabStop="True" UseSystemFocusVisuals="False"/>
+            <Grid x:Name="PlayerSlot" Tapped="OnPlayerTapped" DoubleTapped="OnPlayerDoubleTapped"
+                  IsTabStop="True" UseSystemFocusVisuals="False"/>
 
             <Border x:Name="SkipToast" Visibility="Collapsed"
                     VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,120"

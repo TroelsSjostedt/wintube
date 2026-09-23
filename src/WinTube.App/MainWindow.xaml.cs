@@ -16,6 +16,10 @@ public sealed partial class MainWindow : Window
 
     private readonly UpdateService updates = new();
 
+    /// Captured only when fullscreen is entered from a maximized window, so exiting restores
+    /// maximized rather than dropping to the presenter's own default (normal/restored) size.
+    private bool wasMaximizedBeforeFullScreen;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -69,6 +73,30 @@ public sealed partial class MainWindow : Window
     private void OnRestartForUpdate(object sender, RoutedEventArgs e) => updates.ApplyAndRestart();
 
     public Frame Frame => RootFrame;
+
+    /// Fullscreen video: the window presenter flips and the shell chrome (pane, back arrow)
+    /// collapses so the player page is the only thing on screen. Restoring captures whether the
+    /// window was maximized going in, so exiting lands back on maximized instead of always
+    /// dropping to a normal-sized window.
+    public void SetPlayerFullScreen(bool on)
+    {
+        if (on)
+        {
+            wasMaximizedBeforeFullScreen = AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter
+                { State: Microsoft.UI.Windowing.OverlappedPresenterState.Maximized };
+            AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+        }
+        else
+        {
+            AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
+            if (wasMaximizedBeforeFullScreen && AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter restored)
+                restored.Maximize();
+        }
+
+        Nav.IsPaneVisible = !on;
+        Nav.IsBackButtonVisible = on ? NavigationViewBackButtonVisible.Collapsed
+                                     : NavigationViewBackButtonVisible.Visible;
+    }
 
     /// Entry point for a wintube:// activation or a command-line argument: signed-out is a
     /// no-op (LoginPage is already showing), otherwise fronts the window and navigates
