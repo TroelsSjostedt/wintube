@@ -79,4 +79,29 @@ public class HlsVariantParserTests
         Assert.Empty(HlsVariantParser.Parse(""));
         Assert.Empty(HlsVariantParser.Parse("#EXT-X-STREAM-INF:BANDWIDTH=notanumber,RESOLUTION=axb\nx\n"));
     }
+
+    [Fact]
+    public void FilterToBandwidth_KeepsOnlyThatPair_AndAllOtherLines()
+    {
+        var filtered = HlsVariantParser.FilterToBandwidth(Manifest, 6321284);
+        Assert.Contains("#EXT-X-MEDIA:TYPE=AUDIO", filtered);
+        Assert.Contains("v1080-avc.m3u8", filtered);
+        Assert.DoesNotContain("v1080-vp9.m3u8", filtered);
+        Assert.DoesNotContain("v2160.m3u8", filtered);
+        Assert.DoesNotContain("v360-hi.m3u8", filtered);
+        // The audio-only STREAM-INF pair is dropped too: a STREAM-INF pair is kept iff its
+        // bandwidth matches. Real YouTube audio travels on #EXT-X-MEDIA lines, which pass through.
+        Assert.DoesNotContain("audio-only.m3u8", filtered);
+        Assert.Single(HlsVariantParser.Parse(filtered));
+    }
+
+    [Fact]
+    public void AutoQuality_HighestAtOrBelowScreen()
+    {
+        var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(Manifest)); // 2160, 1080, 360
+        Assert.Equal(1080, HlsVariantParser.AutoQuality(levels, 1440)!.Height);
+        Assert.Equal(2160, HlsVariantParser.AutoQuality(levels, 2160)!.Height);
+        Assert.Equal(360, HlsVariantParser.AutoQuality(levels, 240)!.Height);   // everything too tall -> lowest
+        Assert.Null(HlsVariantParser.AutoQuality([], 1080));
+    }
 }

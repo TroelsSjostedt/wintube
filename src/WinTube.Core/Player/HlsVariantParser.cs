@@ -84,6 +84,39 @@ public static partial class HlsVariantParser
         return string.Join('\n', kept);
     }
 
+    /// Rewrites a master playlist to carry only the single STREAM-INF/URI pair whose
+    /// BANDWIDTH= attribute matches the target. Every non-STREAM-INF line passes through;
+    /// audio-only entries (which have no RESOLUTION) are filtered by the bandwidth check.
+    public static string FilterToBandwidth(string masterPlaylist, uint bandwidth)
+    {
+        var lines = masterPlaylist.Split('\n');
+        var kept = new List<string>(lines.Length);
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].TrimEnd('\r');
+            if (!line.StartsWith("#EXT-X-STREAM-INF:"))
+            {
+                kept.Add(line);
+                continue;
+            }
+            var bandwidthMatch = BandwidthPattern().Match(line);
+            var keep = bandwidthMatch.Success && uint.TryParse(bandwidthMatch.Groups[1].Value, out var bw) && bw == bandwidth;
+            if (keep) kept.Add(line);
+            if (i + 1 < lines.Length)
+            {
+                if (keep) kept.Add(lines[i + 1].TrimEnd('\r'));
+                i++;
+            }
+        }
+        return string.Join('\n', kept);
+    }
+
+    /// Selects the highest quality whose height does not exceed maxHeight, or the lowest
+    /// available quality if all exceed it. Returns null only for an empty quality list.
+    /// Expects the list to be ordered tallest-first, as QualityLevels returns it.
+    public static HlsQuality? AutoQuality(IReadOnlyList<HlsQuality> qualities, int maxHeight) =>
+        qualities.FirstOrDefault(q => q.Height <= maxHeight) ?? qualities.LastOrDefault();
+
     [GeneratedRegex(@"#EXT-X-STREAM-INF:([^\r\n]*)")]
     private static partial Regex StreamInfPattern();
 
