@@ -34,4 +34,15 @@
     <!-- Copied beside the exe so MainWindow can hand the taskbar/title-bar icon to AppWindow. -->
     <Content Include="Assets\wintube.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Native playback engine, fetched by tools/get-libmpv.ps1 (pinned, gitignored). -->
+    <Content Include="..\..\libs\mpv\libmpv-2.dll" Link="libmpv-2.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="EnsureLibMpv" BeforeTargets="PrepareForBuild">
+    <!-- BeforeTargets="Build" fires too late: CoreBuild (which copies Content items)
+         is a DependsOnTargets of Build, so it runs before a Build-scoped hook does.
+         PrepareForBuild is the earliest extensibility point, ahead of that copy. -->
+    <Error Condition="!Exists('..\..\libs\mpv\libmpv-2.dll')"
+           Text="libmpv-2.dll missing - run tools/get-libmpv.ps1 first." />
+  </Target>
 </Project>
