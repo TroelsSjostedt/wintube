@@ -13,6 +13,10 @@
                 <NavigationViewItem x:Name="SubscriptionsItem" Content="Subscriptions" Tag="Subscriptions"/>
                 <NavigationViewItem x:Name="HistoryItem" Content="History" Tag="History"/>
             </NavigationView.MenuItems>
+            <NavigationView.FooterMenuItems>
+                <!-- TEMPORARY (libmpv stage, Task 0b): embedding spike. Removed in Task 10. -->
+                <NavigationViewItem Content="Spike" Tag="spike"/>
+            </NavigationView.FooterMenuItems>
             <NavigationView.PaneFooter>
                 <StackPanel>
                     <Button x:Name="ProfileButton" HorizontalAlignment="Stretch" Margin="4,8,4,0"

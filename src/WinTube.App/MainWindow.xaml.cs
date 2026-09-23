@@ -110,6 +110,7 @@ public sealed partial class MainWindow : Window
             "Search" => typeof(Views.SearchPage),
             "Subscriptions" => typeof(Views.SubscriptionsPage),
             "History" => typeof(Views.HistoryPage),
+            "spike" => typeof(Views.SpikePage), // TEMPORARY (libmpv Task 0b), removed in Task 10
             _ => typeof(Views.HomePage),
         };
         if (RootFrame.SourcePageType != target) RootFrame.Navigate(target);
