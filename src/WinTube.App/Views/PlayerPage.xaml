@@ -42,15 +42,50 @@
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="1">
+        <Grid x:Name="VideoGrid" Grid.Row="1">
             <Grid x:Name="PlayerSlot" Tapped="OnPlayerTapped"/>
 
             <Border x:Name="SkipToast" Visibility="Collapsed"
-                    VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,96"
+                    VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,120"
                     Background="{ThemeResource SystemControlBackgroundAltHighBrush}"
                     CornerRadius="6" Padding="16,8" IsHitTestVisible="False">
                 <TextBlock x:Name="SkipToastText" Style="{ThemeResource BodyTextBlockStyle}"/>
             </Border>
+
+            <Grid x:Name="TransportBar" Visibility="Collapsed" VerticalAlignment="Bottom" Padding="16,8,16,12"
+                  Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                  PointerEntered="OnTransportEntered" PointerExited="OnTransportExited" Tapped="OnTransportBarTapped">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Slider x:Name="SeekBar" Grid.Row="0" Minimum="0" StepFrequency="1"
+                        ThumbToolTipValueConverter="{x:Null}"/>
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+                    <Button x:Name="PlayPauseButton" Grid.Column="0" Click="OnPlayPauseClick"
+                            Background="Transparent" BorderThickness="0">
+                        <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE769;" FontSize="16"/>
+                    </Button>
+                    <Button Grid.Column="1" Background="Transparent" BorderThickness="0" Margin="4,0,0,0">
+                        <FontIcon Glyph="&#xE767;" FontSize="16"/>
+                        <Button.Flyout>
+                            <Flyout x:Name="VolumeFlyout" Placement="Top">
+                                <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Width="160"
+                                        Orientation="Horizontal" ValueChanged="OnVolumeSliderChanged"/>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                    <TextBlock x:Name="TimeLabel" Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center"
+                               FontSize="13" Text="0:00 / 0:00"/>
+                    <DropDownButton x:Name="SpeedButton" Grid.Column="4" Content="1×"
+                                    Background="Transparent" BorderThickness="0" Margin="0,0,4,0">
+                        <DropDownButton.Flyout><MenuFlyout x:Name="SpeedFlyout"/></DropDownButton.Flyout>
+                    </DropDownButton>
+                    <Button x:Name="FullScreenButton" Grid.Column="5" Click="OnFullScreenClick"
+                            Background="Transparent" BorderThickness="0">
+                        <FontIcon x:Name="FullScreenIcon" Glyph="&#xE740;" FontSize="16"/>
+                    </Button>
+                </Grid>
+            </Grid>
 
             <ProgressRing x:Name="LoadingRing" IsActive="True" Width="64" Height="64"
                           HorizontalAlignment="Center" VerticalAlignment="Center"/>

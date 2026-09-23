@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -70,7 +71,27 @@ public sealed partial class PlayerPage : Page
     private bool commentsPaging;
     private double topLevelScrollOffset;
 
-    public PlayerPage() => InitializeComponent();
+    // MARK: transport bar state
+    private DispatcherQueueTimer? volumeSaveTimer;
+    private double pendingVolume;
+    private DispatcherQueueTimer? transportHideTimer;
+    private bool seekBarHeld;
+    private bool transportPointerOverBar;
+    private RadioMenuFlyoutItem? speedOneItem;
+    private static readonly double[] SpeedOptions = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+    public PlayerPage()
+    {
+        InitializeComponent();
+        BuildSpeedMenu();
+        // The Slider consumes its own PointerPressed/Released for thumb dragging and marks them
+        // handled, so plain XAML event attributes would never see them — handledEventsToo gets
+        // seekBarHeld tracking a drag (or a plain click, which still presses then releases).
+        SeekBar.AddHandler(PointerPressedEvent, new PointerEventHandler(OnSeekBarPointerPressed), true);
+        SeekBar.AddHandler(PointerReleasedEvent, new PointerEventHandler(OnSeekBarPointerReleased), true);
+        SeekBar.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(OnSeekBarPointerReleased), true);
+        VideoGrid.AddHandler(PointerMovedEvent, new PointerEventHandler(OnVideoGridPointerMoved), true);
+    }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
@@ -83,6 +104,11 @@ public sealed partial class PlayerPage : Page
         var hasChannel = video.ChannelId is not null && video.Author.Length > 0;
         AuthorLink.Text = hasChannel ? video.Author : "";
         AuthorLink.Visibility = hasChannel ? Visibility.Visible : Visibility.Collapsed;
+
+        // Player is fresh per visit, so mpv's own speed is already 1 — the button/menu just
+        // need to catch up to that.
+        SpeedButton.Content = "1×";
+        if (speedOneItem is not null) speedOneItem.IsChecked = true;
 
         leftPage = false;
         retried = false;
@@ -195,6 +221,9 @@ public sealed partial class PlayerPage : Page
 
         CreatePlayerHost();
         Player!.Volume = App.Session.PlayerSettings.LoadVolume();
+        // Fires OnVolumeSliderChanged, which re-applies the same volume and re-saves it —
+        // harmless, and the simplest way to keep the slider and the host in sync on every load.
+        VolumeSlider.Value = Player.Volume * 100;
         Player.Load(target, resume, stream.UserAgent, stream.OriginalAudioLanguage);
 
         // Backstop watchdog, not the primary failure signal — Errored (mpv's network-timeout
@@ -245,6 +274,7 @@ public sealed partial class PlayerPage : Page
         {
             if (leftPage || host != Player) return;
             HideOverlays();
+            WakeTransport();
             if (!hasPlayed)
             {
                 // Applied once — a ladder retry re-entering Opened after this must resume from
@@ -257,7 +287,7 @@ public sealed partial class PlayerPage : Page
                 _ = LoadSponsorSegmentsAsync();
             }
         };
-        host.PositionChanged += _ => { if (host == Player) OnPlayerPosition(); };
+        host.PositionChanged += _ => { if (host == Player) { OnPlayerPosition(); UpdateTransport(); } };
         host.EndReached += () => { if (host == Player) ReportProgressOnce(); };
         host.Errored += message => { if (!leftPage && host == Player) _ = RetryOrFailAsync(message); };
 
@@ -286,6 +316,128 @@ public sealed partial class PlayerPage : Page
     }
 
     private void TogglePlayPause() => Player?.TogglePause();
+
+    // MARK: transport bar
+
+    private void OnPlayPauseClick(object sender, RoutedEventArgs e)
+    {
+        TogglePlayPause();
+        WakeTransport();
+    }
+
+    /// Player.PositionChanged-driven — refreshes the icon, the time label, and (unless the user
+    /// is mid-drag) the seek bar's position every time mpv reports a new time-pos.
+    private void UpdateTransport()
+    {
+        if (Player is not { } p) return;
+        PlayPauseIcon.Glyph = p.IsPaused ? "" : "";
+        TimeLabel.Text = $"{Fmt(p.Position, p.Duration)} / {Fmt(p.Duration, p.Duration)}";
+        if (!seekBarHeld)
+        {
+            SeekBar.Maximum = p.Duration;
+            SeekBar.Value = p.Position;
+        }
+    }
+
+    /// h:mm:ss once the video runs an hour or more, else m:ss — the DURATION decides the format,
+    /// applied to both numbers so "1:02:03 / 1:30:00" and "0:45 / 3:20" line up.
+    private static string Fmt(double seconds, double durationSeconds)
+    {
+        var span = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return durationSeconds >= 3600
+            ? $"{(int)span.TotalHours}:{span.Minutes:D2}:{span.Seconds:D2}"
+            : $"{(int)span.TotalMinutes}:{span.Seconds:D2}";
+    }
+
+    private void OnSeekBarPointerPressed(object sender, PointerRoutedEventArgs e) => seekBarHeld = true;
+
+    private void OnSeekBarPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        Player?.SeekTo(SeekBar.Value);
+        seekBarHeld = false;
+        WakeTransport();
+    }
+
+    /// Debounced volume persistence: the transport slider fires ValueChanged per notch of a
+    /// drag, so the write waits half a second after the last change. Saving here (rather than
+    /// only on page exit) also survives the window being closed mid-playback.
+    private void OnVolumeSliderChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        var newVolume = e.NewValue / 100;
+        if (Player is { } p) p.Volume = newVolume;
+        pendingVolume = newVolume;
+        volumeSaveTimer ??= CreateVolumeSaveTimer();
+        volumeSaveTimer.Stop();
+        volumeSaveTimer.Start();
+    }
+
+    private DispatcherQueueTimer CreateVolumeSaveTimer()
+    {
+        var timer = dispatcher.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(500);
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => App.Session.PlayerSettings.SaveVolume(pendingVolume);
+        return timer;
+    }
+
+    private void BuildSpeedMenu()
+    {
+        foreach (var value in SpeedOptions)
+        {
+            var item = new RadioMenuFlyoutItem { Text = $"{value:0.##}×", GroupName = "speed", IsChecked = value == 1 };
+            item.Click += (_, _) =>
+            {
+                if (Player is { } p) p.Speed = value;
+                SpeedButton.Content = $"{value:0.##}×";
+            };
+            if (value == 1) speedOneItem = item;
+            SpeedFlyout.Items.Add(item);
+        }
+    }
+
+    private void OnFullScreenClick(object sender, RoutedEventArgs e) { } // Task 7 fills this in
+
+    private void OnTransportEntered(object sender, PointerRoutedEventArgs e) => transportPointerOverBar = true;
+
+    private void OnTransportExited(object sender, PointerRoutedEventArgs e) => transportPointerOverBar = false;
+
+    /// Mirrors OnCommentsPanelTapped: a tap on the bar's own background must never bubble to
+    /// OnPlayerTapped and toggle playback.
+    private void OnTransportBarTapped(object sender, TappedRoutedEventArgs e) => e.Handled = true;
+
+    private void OnVideoGridPointerMoved(object sender, PointerRoutedEventArgs e) => WakeTransport();
+
+    /// Shows the bar and the cursor, and restarts the 3 s auto-hide countdown. Called on Opened,
+    /// on any pointer movement over the video, and on the keys that act on playback.
+    private void WakeTransport()
+    {
+        SetTransportVisible(true);
+        transportHideTimer ??= CreateTransportHideTimer();
+        transportHideTimer.Stop();
+        transportHideTimer.Start();
+    }
+
+    private DispatcherQueueTimer CreateTransportHideTimer()
+    {
+        var timer = dispatcher.CreateTimer();
+        timer.Interval = TimeSpan.FromSeconds(3);
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) =>
+        {
+            // Never hides while there's nothing to show controls for, while paused, while the
+            // pointer is resting on the bar itself, or while a flyout it owns is open.
+            if (Player is null || Player.IsPaused || transportPointerOverBar ||
+                VolumeFlyout.IsOpen || SpeedFlyout.IsOpen) return;
+            SetTransportVisible(false);
+        };
+        return timer;
+    }
+
+    private void SetTransportVisible(bool visible)
+    {
+        TransportBar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        ProtectedCursor = visible ? InputSystemCursor.Create(InputSystemCursorShape.Arrow) : null;
+    }
 
     // MARK: progress
 
@@ -358,6 +510,16 @@ public sealed partial class PlayerPage : Page
 
     private void TearDownPlayer()
     {
+        // A volume change still waiting out its debounce is flushed now — leaving the page
+        // must not lose the last adjustment.
+        if (volumeSaveTimer is { IsRunning: true })
+        {
+            volumeSaveTimer.Stop();
+            App.Session.PlayerSettings.SaveVolume(pendingVolume);
+        }
+        transportHideTimer?.Stop();
+        SetTransportVisible(false);
+
         progressTimer?.Stop();
         progressTimer = null;
         stallTimer?.Stop();
@@ -376,6 +538,8 @@ public sealed partial class PlayerPage : Page
         LoadingRing.IsActive = true;
         LoadingRing.Visibility = Visibility.Visible;
         ErrorPanel.Visibility = Visibility.Collapsed;
+        transportHideTimer?.Stop();
+        SetTransportVisible(false);
     }
 
     private void HideOverlays()
@@ -716,6 +880,26 @@ public sealed partial class PlayerPage : Page
     /// itself); marking the preview pass handled suppresses the later bubbling KeyDown.
     private void OnKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        // No TextBox exists on this page today, so these never need to yield to text entry.
+        if (Player is { } p)
+        {
+            if (e.Key == Windows.System.VirtualKey.Space)
+            {
+                TogglePlayPause();
+                WakeTransport();
+                e.Handled = true;
+                return;
+            }
+            if (e.Key is Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right)
+            {
+                var delta = e.Key == Windows.System.VirtualKey.Left ? -10 : 10;
+                p.SeekTo(Math.Clamp(p.Position + delta, 0, p.Duration));
+                WakeTransport();
+                e.Handled = true;
+                return;
+            }
+        }
+
         if (e.Key != Windows.System.VirtualKey.Escape || CommentsPanel.Visibility != Visibility.Visible) return;
         e.Handled = true;
         if (repliesParent is not null) CloseReplies();
