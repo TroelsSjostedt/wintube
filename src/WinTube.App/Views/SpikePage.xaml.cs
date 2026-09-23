@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using WinTube.App.Mpv;
 
 namespace WinTube.App.Views;
 
@@ -126,8 +127,8 @@ internal sealed class MpvRenderSession : IDisposable
         Environment.GetEnvironmentVariable("WINTUBE_SPIKE_PRESENT") == "1" ? 1u : 0u;
 
     // Delegates handed to native code must stay rooted for the session's lifetime.
-    private readonly Mpv.GetProcAddressFn getProcAddress;
-    private readonly Mpv.UpdateFn onUpdate;
+    private readonly MpvNative.GetProcAddressFn getProcAddress;
+    private readonly MpvNative.UpdateFn onUpdate;
 
     public MpvRenderSession(SwapChainPanel panel, int w, int h, float scaleX, float scaleY)
     {
@@ -154,11 +155,11 @@ internal sealed class MpvRenderSession : IDisposable
 
     public string Describe()
     {
-        var pos = mpv == IntPtr.Zero ? null : Mpv.GetDouble(mpv, "time-pos");
-        var hw = mpv == IntPtr.Zero ? null : Mpv.GetString(mpv, "hwdec-current");
-        var dropped = mpv == IntPtr.Zero ? null : Mpv.GetString(mpv, "frame-drop-count");
-        var decDropped = mpv == IntPtr.Zero ? null : Mpv.GetString(mpv, "decoder-frame-drop-count");
-        var delayed = mpv == IntPtr.Zero ? null : Mpv.GetString(mpv, "vo-delayed-frame-count");
+        var pos = mpv == IntPtr.Zero ? null : MpvNative.GetPropertyDouble(mpv, "time-pos");
+        var hw = mpv == IntPtr.Zero ? null : MpvNative.GetPropertyString(mpv, "hwdec-current");
+        var dropped = mpv == IntPtr.Zero ? null : MpvNative.GetPropertyString(mpv, "frame-drop-count");
+        var decDropped = mpv == IntPtr.Zero ? null : MpvNative.GetPropertyString(mpv, "decoder-frame-drop-count");
+        var delayed = mpv == IntPtr.Zero ? null : MpvNative.GetPropertyString(mpv, "vo-delayed-frame-count");
         return $"render-API frames={Interlocked.Read(ref frames)} size={curW}x{curH} " +
                $"time-pos={(pos is null ? "-" : pos.Value.ToString("F1"))} hwdec={hw ?? "-"} " +
                $"drop(vo)={dropped ?? "-"} drop(dec)={decDropped ?? "-"} delayed={delayed ?? "-"} present={PresentInterval} {lastError}";
@@ -220,17 +221,17 @@ internal sealed class MpvRenderSession : IDisposable
 
     private void CreateMpv()
     {
-        mpv = Mpv.mpv_create();
+        mpv = MpvNative.mpv_create();
         if (mpv == IntPtr.Zero) throw new InvalidOperationException("mpv_create failed");
-        Mpv.SetOption(mpv, "vo", "libmpv");               // required for the render API
-        Mpv.SetOption(mpv, "user-agent", userAgent);
-        Mpv.SetOption(mpv, "hwdec", Environment.GetEnvironmentVariable("WINTUBE_SPIKE_HWDEC") ?? "auto-safe");
+        MpvNative.SetOption(mpv, "vo", "libmpv");               // required for the render API
+        MpvNative.SetOption(mpv, "user-agent", userAgent);
+        MpvNative.SetOption(mpv, "hwdec", Environment.GetEnvironmentVariable("WINTUBE_SPIKE_HWDEC") ?? "auto-safe");
         // ~1080p by default; keeps the spike off the 4K VP9 rung. WINTUBE_SPIKE_HLSBITRATE=max to lift it.
-        Mpv.SetOption(mpv, "hls-bitrate", Environment.GetEnvironmentVariable("WINTUBE_SPIKE_HLSBITRATE") ?? "7000000");
-        Mpv.SetOption(mpv, "volume", "20");
-        Mpv.SetOption(mpv, "log-file", Path.Combine(AppContext.BaseDirectory, "spike-mpv.log"));
-        Mpv.SetOption(mpv, "msg-level", "all=v");
-        Com.Check(Mpv.mpv_initialize(mpv), "mpv_initialize");
+        MpvNative.SetOption(mpv, "hls-bitrate", Environment.GetEnvironmentVariable("WINTUBE_SPIKE_HLSBITRATE") ?? "7000000");
+        MpvNative.SetOption(mpv, "volume", "20");
+        MpvNative.SetOption(mpv, "log-file", Path.Combine(AppContext.BaseDirectory, "spike-mpv.log"));
+        MpvNative.SetOption(mpv, "msg-level", "all=v");
+        Com.Check(MpvNative.mpv_initialize(mpv), "mpv_initialize");
     }
 
     // MARK: render thread
@@ -248,15 +249,15 @@ internal sealed class MpvRenderSession : IDisposable
             Marshal.WriteIntPtr(init, 0, Marshal.GetFunctionPointerForDelegate(getProcAddress));
             Marshal.WriteIntPtr(init, 8, IntPtr.Zero);
             var apiType = Marshal.StringToHGlobalAnsi("opengl");
-            var createParams = Mpv.Params((Mpv.PARAM_API_TYPE, apiType), (Mpv.PARAM_OPENGL_INIT_PARAMS, init));
-            Com.Check(Mpv.mpv_render_context_create(out renderCtx, mpv, createParams), "mpv_render_context_create");
+            var createParams = MpvNative.Params((MpvNative.ParamApiType, apiType), (MpvNative.ParamOpenGlInitParams, init));
+            Com.Check(MpvNative.mpv_render_context_create(out renderCtx, mpv, createParams), "mpv_render_context_create");
             Marshal.FreeHGlobal(createParams);
             Marshal.FreeHGlobal(apiType);
             Marshal.FreeHGlobal(init);
-            Mpv.mpv_render_context_set_update_callback(renderCtx, Marshal.GetFunctionPointerForDelegate(onUpdate), IntPtr.Zero);
+            MpvNative.mpv_render_context_set_update_callback(renderCtx, Marshal.GetFunctionPointerForDelegate(onUpdate), IntPtr.Zero);
             SpikeLog.Write("mpv render context created");
 
-            Com.Check(Mpv.Command(mpv, "loadfile", url), "loadfile");
+            Com.Check(MpvNative.Command(mpv, "loadfile", url), "loadfile");
 
             var fbo = Marshal.AllocHGlobal(16);
             var flipY = Marshal.AllocHGlobal(4);
@@ -271,19 +272,19 @@ internal sealed class MpvRenderSession : IDisposable
                 var resized = w != curW || h != curH;
                 if (resized) Resize(w, h, sx, sy);
 
-                var flags = Mpv.mpv_render_context_update(renderCtx);
+                var flags = MpvNative.mpv_render_context_update(renderCtx);
                 if ((flags & 1) == 0 && !resized) continue;
 
                 Marshal.WriteInt32(fbo, 0, 0);
                 Marshal.WriteInt32(fbo, 4, curW);
                 Marshal.WriteInt32(fbo, 8, curH);
                 Marshal.WriteInt32(fbo, 12, 0);
-                var renderParams = Mpv.Params((Mpv.PARAM_OPENGL_FBO, fbo), (Mpv.PARAM_FLIP_Y, flipY));
-                Mpv.mpv_render_context_render(renderCtx, renderParams);
+                var renderParams = MpvNative.Params((MpvNative.ParamOpenGlFbo, fbo), (MpvNative.ParamFlipY, flipY));
+                MpvNative.mpv_render_context_render(renderCtx, renderParams);
                 Marshal.FreeHGlobal(renderParams);
                 egl.Flush();
                 Present();
-                Mpv.mpv_render_context_report_swap(renderCtx);
+                MpvNative.mpv_render_context_report_swap(renderCtx);
                 if (Interlocked.Increment(ref frames) == 1) SpikeLog.Write("first frame presented");
             }
             Marshal.FreeHGlobal(fbo);
@@ -296,7 +297,7 @@ internal sealed class MpvRenderSession : IDisposable
         }
         finally
         {
-            if (renderCtx != IntPtr.Zero) Mpv.mpv_render_context_free(renderCtx);
+            if (renderCtx != IntPtr.Zero) MpvNative.mpv_render_context_free(renderCtx);
             renderCtx = IntPtr.Zero;
             DestroyTarget();
             if (egl is not null && eglDisplay != IntPtr.Zero)
@@ -390,7 +391,7 @@ internal sealed class MpvRenderSession : IDisposable
         quit = true;
         wake.Set();
         if (thread.IsAlive) thread.Join(3000);
-        if (mpv != IntPtr.Zero) Mpv.mpv_terminate_destroy(mpv);
+        if (mpv != IntPtr.Zero) MpvNative.mpv_terminate_destroy(mpv);
         mpv = IntPtr.Zero;
         // UI thread: detach, or the panel keeps its own reference and shows the last frame.
         var panelNative = Com.QueryInterface(((WinRT.IWinRTObject)panel).NativeObject.ThisPtr, Com.IID_ISwapChainPanelNative);
@@ -568,70 +569,4 @@ internal sealed class Egl
     public void Flush() => glFlush();
     public string GetString(int name) => Marshal.PtrToStringAnsi(glGetString(name)) ?? "";
     public string QueryString(IntPtr display, int name) => Marshal.PtrToStringAnsi(queryString(display, name)) ?? "";
-}
-
-internal static class Mpv
-{
-    private const string Lib = "libmpv-2.dll";
-    public const int PARAM_API_TYPE = 1, PARAM_OPENGL_INIT_PARAMS = 2, PARAM_OPENGL_FBO = 3, PARAM_FLIP_Y = 4;
-    private const int FORMAT_STRING = 1, FORMAT_DOUBLE = 5;
-
-    public delegate IntPtr GetProcAddressFn(IntPtr ctx, [MarshalAs(UnmanagedType.LPStr)] string name);
-    public delegate void UpdateFn(IntPtr ctx);
-
-    [DllImport(Lib)] public static extern IntPtr mpv_create();
-    [DllImport(Lib)] public static extern int mpv_initialize(IntPtr h);
-    [DllImport(Lib)] public static extern void mpv_terminate_destroy(IntPtr h);
-    [DllImport(Lib)] private static extern int mpv_set_option_string(IntPtr h, byte[] name, byte[] value);
-    [DllImport(Lib)] private static extern int mpv_command(IntPtr h, IntPtr[] args);
-    [DllImport(Lib)] private static extern int mpv_get_property(IntPtr h, byte[] name, int format, out double data);
-    [DllImport(Lib)] private static extern int mpv_get_property(IntPtr h, byte[] name, int format, out IntPtr data);
-    [DllImport(Lib)] private static extern void mpv_free(IntPtr data);
-    [DllImport(Lib)] public static extern int mpv_render_context_create(out IntPtr ctx, IntPtr mpv, IntPtr parameters);
-    [DllImport(Lib)] public static extern void mpv_render_context_set_update_callback(IntPtr ctx, IntPtr callback, IntPtr callbackCtx);
-    [DllImport(Lib)] public static extern ulong mpv_render_context_update(IntPtr ctx);
-    [DllImport(Lib)] public static extern int mpv_render_context_render(IntPtr ctx, IntPtr parameters);
-    [DllImport(Lib)] public static extern void mpv_render_context_report_swap(IntPtr ctx);
-    [DllImport(Lib)] public static extern void mpv_render_context_free(IntPtr ctx);
-
-    private static byte[] Utf8(string s) => System.Text.Encoding.UTF8.GetBytes(s + "\0");
-
-    public static void SetOption(IntPtr h, string name, string value)
-    {
-        var rc = mpv_set_option_string(h, Utf8(name), Utf8(value));
-        if (rc < 0) SpikeLog.Write($"mpv option {name}={value} rc={rc}");
-    }
-
-    public static int Command(IntPtr h, params string[] args)
-    {
-        var ptrs = new IntPtr[args.Length + 1];
-        for (var i = 0; i < args.Length; i++) ptrs[i] = Marshal.StringToCoTaskMemUTF8(args[i]);
-        try { return mpv_command(h, ptrs); }
-        finally { foreach (var p in ptrs[..^1]) Marshal.FreeCoTaskMem(p); }
-    }
-
-    public static double? GetDouble(IntPtr h, string name) =>
-        mpv_get_property(h, Utf8(name), FORMAT_DOUBLE, out double v) == 0 ? v : null;
-
-    public static string? GetString(IntPtr h, string name)
-    {
-        if (mpv_get_property(h, Utf8(name), FORMAT_STRING, out IntPtr p) != 0) return null;
-        var s = Marshal.PtrToStringUTF8(p);
-        mpv_free(p);
-        return s;
-    }
-
-    /// A zero-terminated mpv_render_param array ({int type; void* data} = 16 bytes each on x64).
-    public static IntPtr Params(params (int Type, IntPtr Data)[] items)
-    {
-        var p = Marshal.AllocHGlobal(16 * (items.Length + 1));
-        for (var i = 0; i <= items.Length; i++)
-        {
-            var (type, data) = i < items.Length ? items[i] : (0, IntPtr.Zero);
-            Marshal.WriteInt64(p, i * 16, 0);
-            Marshal.WriteInt32(p, i * 16, type);
-            Marshal.WriteIntPtr(p, i * 16 + 8, data);
-        }
-        return p;
-    }
 }
