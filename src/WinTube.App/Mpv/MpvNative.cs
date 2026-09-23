@@ -4,7 +4,7 @@ using System.Text;
 namespace WinTube.App.Mpv;
 
 /// The libmpv functions WinTube uses, straight from client.h/render.h. Strings cross as UTF-8;
-/// mpv owns every pointer it returns from wait_event/get_property(string) until freed/the next call.
+/// mpv owns every pointer it returns from wait_event until the next call.
 /// DllImport, not LibraryImport: the source-generated form needs AllowUnsafeBlocks, which this
 /// project does not set (the spike proved DllImport builds clean under TreatWarningsAsErrors as-is).
 internal static class MpvNative
@@ -16,14 +16,11 @@ internal static class MpvNative
     [DllImport(Lib)] internal static extern void mpv_terminate_destroy(IntPtr handle);
     [DllImport(Lib)] internal static extern int mpv_set_option_string(IntPtr handle, byte[] name, byte[] value);
     [DllImport(Lib)] internal static extern int mpv_command(IntPtr handle, IntPtr[] args);
-    [DllImport(Lib)] internal static extern int mpv_get_property(IntPtr handle, byte[] name, int format, out double data);
-    [DllImport(Lib)] internal static extern int mpv_get_property(IntPtr handle, byte[] name, int format, out IntPtr data);
     [DllImport(Lib)] internal static extern int mpv_set_property(IntPtr handle, byte[] name, int format, ref double data);
     [DllImport(Lib)] internal static extern int mpv_observe_property(IntPtr handle, ulong userdata, byte[] name, int format);
     [DllImport(Lib)] internal static extern IntPtr mpv_wait_event(IntPtr handle, double timeout);
     [DllImport(Lib)] internal static extern void mpv_wakeup(IntPtr handle);
     [DllImport(Lib)] internal static extern IntPtr mpv_error_string(int error);
-    [DllImport(Lib)] internal static extern void mpv_free(IntPtr data);
 
     // Render API (opengl, drawn through ANGLE). `parameters` is a raw pointer to a zero-terminated
     // array of mpv_render_param ({int type; void* data}, 16 bytes each on x64) built by Params below
@@ -35,7 +32,6 @@ internal static class MpvNative
     [DllImport(Lib)] internal static extern void mpv_render_context_report_swap(IntPtr ctx);
     [DllImport(Lib)] internal static extern void mpv_render_context_free(IntPtr ctx);
 
-    internal const int FormatString = 1;   // MPV_FORMAT_STRING
     internal const int FormatFlag = 3;     // MPV_FORMAT_FLAG
     internal const int FormatDouble = 5;   // MPV_FORMAT_DOUBLE
 
@@ -56,7 +52,7 @@ internal static class MpvNative
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct EventEndFile { public int Reason; public int Error; public long PlaylistEntryId; }
-    internal const int EndFileEof = 0, EndFileError = 4;   // MPV_END_FILE_REASON_*
+    internal const int EndFileError = 4;   // MPV_END_FILE_REASON_*
 
     internal delegate IntPtr GetProcAddressFn(IntPtr ctx, [MarshalAs(UnmanagedType.LPStr)] string name);
     internal delegate void UpdateFn(IntPtr ctx);
@@ -74,22 +70,8 @@ internal static class MpvNative
         finally { for (var i = 0; i < args.Length; i++) Marshal.FreeCoTaskMem(ptrs[i]); }
     }
 
-    internal static double? GetPropertyDouble(IntPtr handle, string name) =>
-        mpv_get_property(handle, Utf8(name), FormatDouble, out double value) == 0 ? value : null;
-
-    internal static string? GetPropertyString(IntPtr handle, string name)
-    {
-        if (mpv_get_property(handle, Utf8(name), FormatString, out IntPtr ptr) != 0) return null;
-        var s = Marshal.PtrToStringUTF8(ptr);
-        mpv_free(ptr);
-        return s;
-    }
-
     internal static void SetPropertyDouble(IntPtr handle, string name, double value) =>
         mpv_set_property(handle, Utf8(name), FormatDouble, ref value);
-
-    internal static void ObserveDouble(IntPtr handle, string name, ulong userdata) =>
-        mpv_observe_property(handle, userdata, Utf8(name), FormatDouble);
 
     internal static string ErrorString(int error) =>
         Marshal.PtrToStringUTF8(mpv_error_string(error)) ?? $"mpv error {error}";

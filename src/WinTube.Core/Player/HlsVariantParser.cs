@@ -6,7 +6,7 @@ namespace WinTube.Core.Player;
 public sealed record HlsVariant(int Height, uint Bandwidth, string Codecs);
 
 /// One entry of the quality picker: a height and the exact BANDWIDTH of the variant that
-/// represents it, which is what AdaptiveMediaSource's Desired bitrates are pinned to.
+/// represents it, which FilterToBandwidth pins the single-variant manifest fed to mpv to.
 public sealed record HlsQuality(int Height, uint Bandwidth)
 {
     public string Label => $"{Height}p";
@@ -54,35 +54,6 @@ public static partial class HlsVariantParser
             .OrderByDescending(v => v.Height)
             .Select(v => new HlsQuality(v.Height, v.Bandwidth))
             .ToList();
-
-    /// Rewrites a master playlist to carry only its H.264 rungs. Media Foundation's HLS
-    /// pipeline refuses the VP9 variants YouTube now includes (SourceNotSupported the moment
-    /// the source opens, even with the VP9 decoder installed), so the player feeds
-    /// AdaptiveMediaSource this filtered text instead of the raw manifest. A STREAM-INF line
-    /// and the URI line after it travel as a pair; every other line passes through.
-    public static string FilterToAvc(string masterPlaylist)
-    {
-        var lines = masterPlaylist.Split('\n');
-        var kept = new List<string>(lines.Length);
-        for (var i = 0; i < lines.Length; i++)
-        {
-            var line = lines[i].TrimEnd('\r');
-            if (!line.StartsWith("#EXT-X-STREAM-INF:"))
-            {
-                kept.Add(line);
-                continue;
-            }
-            var codecs = CodecsPattern().Match(line);
-            var keep = codecs.Success && codecs.Groups[1].Value.Contains("avc1");
-            if (keep) kept.Add(line);
-            if (i + 1 < lines.Length)
-            {
-                if (keep) kept.Add(lines[i + 1].TrimEnd('\r'));
-                i++;
-            }
-        }
-        return string.Join('\n', kept);
-    }
 
     /// Rewrites a master playlist to carry only the single STREAM-INF/URI pair whose
     /// BANDWIDTH= attribute matches the target. Every non-STREAM-INF, non-EXT-X-MEDIA line

@@ -59,21 +59,6 @@ public class HlsVariantParserTests
     }
 
     [Fact]
-    public void FilterToAvc_KeepsHeaderAndH264Pairs_DropsVp9Pairs()
-    {
-        var filtered = HlsVariantParser.FilterToAvc(Manifest);
-        Assert.Contains("#EXT-X-MEDIA:TYPE=AUDIO", filtered);            // header passes through
-        Assert.Contains("v1080-avc.m3u8", filtered);
-        Assert.Contains("v360-hi.m3u8", filtered);
-        Assert.DoesNotContain("v1080-vp9.m3u8", filtered);
-        Assert.DoesNotContain("v1080-hdr.m3u8", filtered);
-        Assert.DoesNotContain("v2160.m3u8", filtered);
-        Assert.DoesNotContain("vp09", filtered);
-        var variants = HlsVariantParser.Parse(filtered);
-        Assert.Equal([1080, 360], HlsVariantParser.QualityLevels(variants).Select(q => q.Height));
-    }
-
-    [Fact]
     public void Parse_GarbageAndEmpty_YieldNothing()
     {
         Assert.Empty(HlsVariantParser.Parse(""));
