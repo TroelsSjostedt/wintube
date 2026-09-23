@@ -13,7 +13,8 @@ namespace WinTube.App.Mpv;
 ///
 /// Lifecycle: construct, add to the visual tree, call Load (may be called again for a new video
 /// without recreating the pipeline), Dispose when the page is done with it. Load before the
-/// control has laid out is deferred to Loaded, since the swap chain needs a real pixel size.
+/// control has laid out is deferred to Loaded, since the swap chain needs a real pixel size, and
+/// a Load before the render context exists is deferred to OnRenderReady (see there).
 ///
 /// Threading: UI thread owns device/swap-chain creation, mpv create/init and the public surface.
 /// A dedicated event thread drains mpv_wait_event and marshals everything user-visible through
@@ -66,6 +67,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     private Thread? renderThread;
     private volatile bool disposed;
     private bool loadedIntoTree;
+    private bool renderReady; // UI thread only; set by OnRenderReady
     private PendingLoad? pendingLoad;
     private double volume = 1.0, speed = 1.0;
     private bool eofReached; // edge-detects eof-reached false->true; event thread only
@@ -161,6 +163,30 @@ public sealed class MpvPlayerHost : Grid, IDisposable
                 return;
             }
         }
+        if (!renderReady)
+        {
+            pendingLoad = request; // latest wins; OnRenderReady applies it
+            return;
+        }
+        LoadNow(request);
+    }
+
+    /// vo=libmpv only gets a VO if the render context already exists when the file's video
+    /// initializes; otherwise mpv logs "No render context set", drops to "Video: no video" and
+    /// plays that file audio-only, and a render context created later never brings video back.
+    /// The render thread's cold start (first ANGLE/D3D init in the process) can lose that race
+    /// against a fast open, which is what left the first video of a session black. So loadfile
+    /// waits for this, posted by RenderLoop right after mpv_render_context_create.
+    private void OnRenderReady()
+    {
+        renderReady = true;
+        if (pendingLoad is not { } request) return;
+        pendingLoad = null;
+        LoadNow(request);
+    }
+
+    private void LoadNow(PendingLoad request)
+    {
         try
         {
             DoLoad(request);
@@ -415,6 +441,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
             Marshal.FreeHGlobal(apiType);
             Marshal.FreeHGlobal(init);
             MpvNative.mpv_render_context_set_update_callback(renderCtx, Marshal.GetFunctionPointerForDelegate(onUpdate), IntPtr.Zero);
+            Post(OnRenderReady);
 
             var fbo = Marshal.AllocHGlobal(16);
             var flipY = Marshal.AllocHGlobal(4);
