@@ -1,0 +1,189 @@
+<title>WinTube libmpv Player</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5; --ink: #24211E; --muted: #6B645C; --accent: #A63D2F;
+    --line: #E4DFD8; --card: #FFFFFF; --code-bg: #F1EDE7; --ok: #3E7A4E; --warn: #A8721C;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+      --line: #35302B; --card: #242019; --code-bg: #262119; --ok: #6FAF7E; --warn: #D19A45;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+    --line: #35302B; --card: #242019; --code-bg: #262119; --ok: #6FAF7E; --warn: #D19A45;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: "Public Sans", "Segoe UI", system-ui, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; padding: 0 1.25rem 6rem; }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2 { font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  p { margin: .75rem 0; }
+  code, pre { font-family: "IBM Plex Mono", Consolas, monospace; font-size: .85em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: .75rem 1rem; border-radius: 8px; overflow-x: auto; }
+  .eyebrow { font-family: "Schibsted Grotesk", sans-serif; font-size: .72rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 3.5rem 0 .25rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; color: var(--muted); font-size: .85rem; margin: 1rem 0 0; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: "Schibsted Grotesk", sans-serif; font-size: .78rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: .4rem .75rem .4rem 0; }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .75rem .55rem 0; vertical-align: top; }
+  td:first-child, th:first-child { padding-left: 0; }
+  ul, ol { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+  figure { margin: 1.5rem 0; }
+  figcaption { color: var(--muted); font-size: .82rem; margin-top: .4rem; }
+  .callout { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: .75rem 1rem; margin: 1rem 0; }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Stage 10 · Approved 2026-09-23</p>
+  <h1>WinTube libmpv Player</h1>
+  <p>Replace Media Foundation with libmpv for video playback. YouTube's TV HLS manifests now
+  use video-only TS variants plus packed-audio (ID3+AAC) renditions, which Media Foundation
+  cannot play — every video silently fell back to 360p. libmpv plays these manifests natively,
+  including VP9 up to 4K with Opus audio.</p>
+  <div class="meta">
+    <span><b>Base</b> WinTube stages 1–9</span>
+    <span><b>Replaces</b> MediaPlayerElement / AdaptiveMediaSource in PlayerPage</span>
+    <span><b>Unchanged</b> hover previews, InnerTube resolution ladder, sync, SponsorBlock data</span>
+  </div>
+</header>
+
+<h2>0 · Stage-0 gate (build this first, prove it, then continue)</h2>
+<div class="callout">
+  <b>Nothing beyond stage 0 is built until the gate passes.</b> A throwaway spike must prove,
+  against a real VISIONOS <code>hlsManifestUrl</code>:
+  audio+video playback, a variant above 360p, seeking, and rendering through the
+  <b>mpv render API</b> into a XAML <code>SwapChainPanel</code> (OpenGL via ANGLE).
+</div>
+<ul>
+  <li><b>Pass fully</b> → build the stage as specified below.</li>
+  <li><b>Playback passes, render-API embedding fails</b> → fall back to a child HWND
+  (<code>--wid</code>) hosting mpv's own video window; XAML overlays (comments, toast,
+  transport bar) then render in an airspace-safe layer above it. The rest of the spec is
+  unchanged — <code>MpvPlayerHost</code> hides the difference.</li>
+  <li><b>Playback itself fails</b> → stop; the stage is re-evaluated from scratch.</li>
+  <li>Spike code lives in <code>scratchpad</code> and is thrown away; only the findings and
+  the chosen embedding survive into the implementation.</li>
+</ul>
+
+<h2>1 · Binaries: pinned libmpv, download script</h2>
+<ul>
+  <li><code>tools/get-libmpv.ps1</code> downloads a <b>pinned</b> <code>libmpv-2.dll</code>
+  build (zhongfly/mpv-winbuild, x86_64) from its GitHub release, verifies a hard-coded
+  SHA-256, and unpacks into <code>libs/mpv/</code> (gitignored).</li>
+  <li>The app project copies <code>libs/mpv/libmpv-2.dll</code> to the output directory;
+  a missing DLL fails the build with a message pointing at the script.</li>
+  <li>CI (<code>release.yml</code> and the test workflow if it builds the app) runs the same
+  script before publish, so the DLL ships inside the Velopack package.</li>
+  <li>Upgrading mpv = bump one URL + one hash in the script.</li>
+</ul>
+
+<h2>2 · Binding: thin hand-rolled P/Invoke</h2>
+<ul>
+  <li>New folder <code>src/WinTube.App/Mpv/</code> (UI-bound, so it lives in the App project):
+  <code>MpvNative.cs</code> with <code>DllImport</code>s for the &lt;20 functions used —
+  <code>mpv_create</code>, <code>mpv_initialize</code>, <code>mpv_command</code>,
+  <code>mpv_set_property</code>/<code>get_property</code>,
+  <code>mpv_observe_property</code>, <code>mpv_wait_event</code>,
+  <code>mpv_terminate_destroy</code>, and the <code>mpv_render_context_*</code> family.</li>
+  <li>No NuGet wrapper: the maintained ones lag mpv versions, and the API surface we need is
+  tiny.</li>
+  <li>One event-loop thread per player instance pumps <code>mpv_wait_event</code> and
+  marshals to the UI thread via <code>DispatcherQueue</code>. Property observation drives
+  position/duration/pause/error state — no polling timers.</li>
+</ul>
+
+<h2>3 · MpvPlayerHost control</h2>
+<p>A single XAML control owns the <code>SwapChainPanel</code>, the ANGLE/EGL surface, the mpv
+handle and its render context, and exposes a small player interface. PlayerPage talks only to
+this interface; <code>MediaPlayerElement</code> and all <code>AdaptiveMediaSource</code> code
+is removed.</p>
+<div class="table-wrap"><table>
+  <tr><th>Member</th><th>Meaning</th></tr>
+  <tr><td><code>Load(url, startAt)</code></td><td>Open a URL (filtered HLS manifest via <code>data:</code>/temp file, or direct MP4) and start at an offset — replaces today's resume-position logic.</td></tr>
+  <tr><td><code>IsPaused</code>, <code>TogglePause()</code></td><td>Backed by mpv's <code>pause</code> property.</td></tr>
+  <tr><td><code>Position</code>, <code>Duration</code>, <code>PositionChanged</code></td><td>From observed <code>time-pos</code>/<code>duration</code>; SponsorBlock skips and progress sync subscribe here.</td></tr>
+  <tr><td><code>SeekTo(seconds)</code></td><td><code>seek … absolute</code>.</td></tr>
+  <tr><td><code>Volume</code></td><td>0–100, wired to <code>PlayerSettingsStore</code> exactly as today.</td></tr>
+  <tr><td><code>Speed</code></td><td>mpv <code>speed</code> property, 0.25–2.</td></tr>
+  <tr><td><code>Opened</code>, <code>EndReached</code>, <code>Errored</code></td><td>From <code>MPV_EVENT_FILE_LOADED</code> / <code>end-file</code> reasons; drive loading ring, autoplay-next hooks and the error panel.</td></tr>
+</table></div>
+<ul>
+  <li>HTTP headers (stream user agent) pass via mpv's <code>user-agent</code> option;
+  hardware decoding via <code>hwdec=auto-safe</code>.</li>
+  <li>Lifetime: created per PlayerPage navigation, destroyed on navigate-away (same discipline
+  as today's player teardown; no leaked event threads).</li>
+</ul>
+
+<h2>4 · Custom transport bar</h2>
+<p><code>MediaTransportControls</code> disappears with <code>MediaPlayerElement</code>, so
+PlayerPage gets its own overlay bar, bottom-anchored above the video:</p>
+<ul>
+  <li><b>Controls:</b> play/pause · seekbar with elapsed/total time · volume (persisted) ·
+  speed picker 0.25–2× · fullscreen toggle.</li>
+  <li><b>Auto-hide:</b> bar and cursor hide after ~3 s without pointer movement over the
+  video; any movement or key brings them back. Bar stays while a flyout is open or the
+  pointer is over it.</li>
+  <li><b>Click-to-pause</b> on the video surface works as today (ancestor check so bar
+  clicks don't fall through), and existing keyboard shortcuts (space, arrows, Esc) move over
+  unchanged.</li>
+  <li><b>Fullscreen is ours</b> (<code>AppWindow</code> FullScreenPresenter): the comments
+  panel, skip toast and loading ring now also work in fullscreen — the parked
+  "comments hidden in full-window mode" limitation disappears.</li>
+</ul>
+
+<h2>5 · Quality picker on mpv</h2>
+<ul>
+  <li>mpv/FFmpeg's HLS demuxer plays one chosen variant; there is no continuous adaptive
+  switching. The picker therefore works at the manifest level, reusing
+  <code>HlsVariantParser</code>.</li>
+  <li>The master manifest is fetched once (as today); the menu lists one entry per height —
+  VP9 heights (1440p/2160p) are now real choices since mpv decodes VP9/Opus.</li>
+  <li>Choosing a height builds a <b>filtered manifest</b> containing only that height's best
+  variant plus all <code>#EXT-X-MEDIA</code> audio renditions, and reloads mpv at the current
+  position. <code>FilterToAvc</code> generalizes into filter-to-selection.</li>
+  <li><b>Auto</b> = the highest variant whose height does not exceed the current
+  window/monitor resolution (manual choice can still force 4K). The label shows
+  <code>Auto · 1440p</code> style, as today.</li>
+  <li>The preferred height remains session-static (<code>preferredHeight</code>), carried
+  across videos.</li>
+</ul>
+
+<h2>6 · What does not change</h2>
+<div class="table-wrap"><table>
+  <tr><th>Area</th><th>Status</th></tr>
+  <tr><td>Hover previews</td><td>Stay on Media Foundation with the ANDROID itag-18 MP4 — cheap, working, muted 360p is fine for previews.</td></tr>
+  <tr><td>URL resolution</td><td>InnerTube client ladder (VISIONOS → ANDROID) and the permanent <code>player retry</code> log line stay; only what consumes the URL changes.</td></tr>
+  <tr><td>SponsorBlock, progress sync, watch history</td><td>Re-subscribe to <code>MpvPlayerHost.PositionChanged</code> instead of the MediaPlayer session; logic untouched.</td></tr>
+  <tr><td>Comments panel, skip toast, copy link, author link</td><td>Untouched XAML overlays — the point of the render-API embedding.</td></tr>
+  <tr><td>Velopack / CI</td><td>Only addition: run <code>tools/get-libmpv.ps1</code> before publish so the DLL is packaged.</td></tr>
+</table></div>
+
+<h2>7 · Testing</h2>
+<ul>
+  <li><b>Core tests:</b> filter-to-selection manifest rewriting (chosen height kept, audio
+  renditions kept, other variants dropped), Auto-height choice against a monitor resolution,
+  parser regressions.</li>
+  <li><b>Manual gate per build:</b> a known 4K video plays with audio at 2160p, seek works,
+  SponsorBlock skips fire, progress resumes, fullscreen + comments coexist, quality switch
+  keeps position.</li>
+  <li>P/Invoke and render plumbing are exercised by the app itself, not unit tests — the
+  stage-0 spike is their proving ground.</li>
+</ul>
+
+<h2>8 · Out of scope</h2>
+<ul>
+  <li>Continuous adaptive bitrate switching, subtitles/captions, audio-track selection,
+  HDR passthrough, casting, picture-in-picture.</li>
+  <li>Replacing the preview pipeline or Shorts playback behavior beyond what
+  <code>MpvPlayerHost</code> gives for free.</li>
+</ul>
+</main>
