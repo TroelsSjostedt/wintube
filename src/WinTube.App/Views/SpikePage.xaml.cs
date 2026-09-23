@@ -53,6 +53,7 @@ public sealed partial class SpikePage : Page
     private void OnStop(object sender, RoutedEventArgs e) => StopSession();
     private void OnTogglePause(object sender, RoutedEventArgs e) => host?.TogglePause();
     private void OnSeekForward(object sender, RoutedEventArgs e) => host?.SeekTo(host.Position + 10);
+    private void OnSeekNearEnd(object sender, RoutedEventArgs e) => host?.SeekTo(Math.Max(0, host.Duration - 2));
     private void OnVolumeUp(object sender, RoutedEventArgs e) { if (host is not null) host.Volume = Math.Min(1.0, host.Volume + 0.1); }
     private void OnVolumeDown(object sender, RoutedEventArgs e) { if (host is not null) host.Volume = Math.Max(0.0, host.Volume - 0.1); }
     private void OnSpeedUp(object sender, RoutedEventArgs e) { if (host is not null) host.Speed = Math.Min(2.0, host.Speed + 0.25); }

@@ -22,7 +22,7 @@ namespace WinTube.App.Mpv;
 /// touches XAML directly; events raised after Dispose are dropped.
 public sealed class MpvPlayerHost : Grid, IDisposable
 {
-    private const ulong PosUserdata = 1, DurUserdata = 2, PauseUserdata = 3;
+    private const ulong PosUserdata = 1, DurUserdata = 2, PauseUserdata = 3, EofUserdata = 4;
 
     public event Action? Opened;
     public event Action<double>? PositionChanged;
@@ -62,6 +62,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     private bool loadedIntoTree;
     private PendingLoad? pendingLoad;
     private double volume = 1.0, speed = 1.0;
+    private bool eofReached; // edge-detects eof-reached false->true; event thread only
 
     // Latest requested pixel size / DPI scale; the render thread applies it.
     private readonly object sizeGate = new();
@@ -72,7 +73,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
 
     // Render-thread-owned state.
     private Egl? egl;
-    private IntPtr eglDisplay, eglConfig, eglContext, eglSurface, texture;
+    private IntPtr eglDeviceHandle, eglDisplay, eglConfig, eglContext, eglSurface, texture;
     private int curW, curH;
     private IntPtr renderCtx;
 
@@ -104,8 +105,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
             pendingLoad = request; // applied from OnLoaded once the panel has a real size
             return;
         }
-        if (mpv == IntPtr.Zero) EnsureStarted();
-        DoLoad(request);
+        StartAndLoad(request);
     }
 
     public void Play() { if (mpv != IntPtr.Zero) MpvNative.Command(mpv, "set", "pause", "no"); }
@@ -124,10 +124,52 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     {
         loadedIntoTree = true;
         if (pendingLoad is not { } request || mpv != IntPtr.Zero) return;
-        EnsureStarted();
-        DoLoad(request);
         pendingLoad = null;
+        StartAndLoad(request);
     }
+
+    /// Brings the pipeline up if it isn't already, then loads — without letting a native failure
+    /// (missing ANGLE DLL, device/mpv init failure, a rejected loadfile) escape a XAML event
+    /// handler and kill the process. A failure while bringing the pipeline up is fully torn down
+    /// (TeardownFailedStart) so the next Load() gets a clean EnsureStarted rather than working off
+    /// a half-built pipeline (mpv non-zero but never initialized, etc); a failure from an
+    /// already-healthy pipeline (e.g. one bad loadfile) just surfaces Errored and leaves the
+    /// pipeline running for a retry.
+    private void StartAndLoad(PendingLoad request)
+    {
+        if (mpv == IntPtr.Zero)
+        {
+            try
+            {
+                EnsureStarted();
+            }
+            catch (Exception ex)
+            {
+                TeardownFailedStart();
+                RaiseErrored($"start: {ex.Message}");
+                return;
+            }
+        }
+        try
+        {
+            DoLoad(request);
+        }
+        catch (Exception ex)
+        {
+            RaiseErrored($"load: {ex.Message}");
+        }
+    }
+
+    private void RaiseErrored(string message)
+    {
+        if (disposed) return;
+        Errored?.Invoke(message);
+    }
+
+    /// Cleans up whatever EnsureStarted managed to create before it threw, back to "nothing built
+    /// yet". EnsureStarted only starts the event/render threads after CreateMpv succeeds, so a
+    /// failure here never has a thread to join first.
+    private void TeardownFailedStart() => TeardownNativeState();
 
     private void EnsureStarted()
     {
@@ -168,6 +210,10 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         MpvNative.mpv_observe_property(mpv, PosUserdata, Utf8("time-pos"), MpvNative.FormatDouble);
         MpvNative.mpv_observe_property(mpv, DurUserdata, Utf8("duration"), MpvNative.FormatDouble);
         MpvNative.mpv_observe_property(mpv, PauseUserdata, Utf8("pause"), MpvNative.FormatFlag);
+        // keep-open=yes means mpv sets stop_play=KEEP_PLAYING at end of file and never sends an
+        // end-file/eof event; eof-reached is the only signal left, so EndReached is driven off its
+        // false->true edge (HandlePropertyChange) instead of the end-file event.
+        MpvNative.mpv_observe_property(mpv, EofUserdata, Utf8("eof-reached"), MpvNative.FormatFlag);
     }
 
     private static byte[] Utf8(string s) => Encoding.UTF8.GetBytes(s + "\0");
@@ -268,12 +314,13 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         }
     }
 
+    /// eof-reached (below) owns EndReached; end-file's eof reason never fires with keep-open=yes.
+    /// This stays for load failures, which still end the file via this event.
     private void HandleEndFile(MpvNative.Event ev)
     {
         if (ev.Data == IntPtr.Zero) return;
         var end = Marshal.PtrToStructure<MpvNative.EventEndFile>(ev.Data);
-        if (end.Reason == MpvNative.EndFileEof) Post(() => EndReached?.Invoke());
-        else if (end.Reason == MpvNative.EndFileError)
+        if (end.Reason == MpvNative.EndFileError)
         {
             var message = MpvNative.ErrorString(end.Error);
             Post(() => Errored?.Invoke(message));
@@ -298,6 +345,11 @@ public sealed class MpvPlayerHost : Grid, IDisposable
             case PauseUserdata when prop.Format == MpvNative.FormatFlag:
                 var paused = Marshal.ReadInt32(prop.Data) != 0;
                 Post(() => IsPaused = paused);
+                break;
+            case EofUserdata when prop.Format == MpvNative.FormatFlag:
+                var eof = Marshal.ReadInt32(prop.Data) != 0;
+                if (eof && !eofReached) { eofReached = true; Post(() => EndReached?.Invoke()); }
+                else if (!eof) eofReached = false; // reset for the next Load's edge
                 break;
         }
     }
@@ -379,15 +431,23 @@ public sealed class MpvPlayerHost : Grid, IDisposable
                 if (eglContext != IntPtr.Zero) egl.DestroyContext(eglDisplay, eglContext);
                 egl.Terminate(eglDisplay);
             }
+            // ANGLE's Device11 holds its own AddRef on the D3D11 device for as long as the
+            // EGLDevice lives; without this release, Dispose's Com.Release(device) never reaches
+            // 0 and the device (plus everything it holds) leaks every construct/Load/Dispose cycle.
+            if (egl is not null && eglDeviceHandle != IntPtr.Zero)
+            {
+                egl.ReleaseDeviceANGLE(eglDeviceHandle);
+                eglDeviceHandle = IntPtr.Zero;
+            }
         }
     }
 
     private void InitEgl()
     {
         egl = Egl.Load();
-        var eglDevice = egl.CreateDeviceANGLE(0x33A1 /* EGL_D3D11_DEVICE_ANGLE */, device, IntPtr.Zero);
-        if (eglDevice == IntPtr.Zero) throw new InvalidOperationException($"eglCreateDeviceANGLE 0x{egl.GetError():x}");
-        eglDisplay = egl.GetPlatformDisplayEXT(0x313F /* EGL_PLATFORM_DEVICE_EXT */, eglDevice, [Egl.NONE]);
+        eglDeviceHandle = egl.CreateDeviceANGLE(0x33A1 /* EGL_D3D11_DEVICE_ANGLE */, device, IntPtr.Zero);
+        if (eglDeviceHandle == IntPtr.Zero) throw new InvalidOperationException($"eglCreateDeviceANGLE 0x{egl.GetError():x}");
+        eglDisplay = egl.GetPlatformDisplayEXT(0x313F /* EGL_PLATFORM_DEVICE_EXT */, eglDeviceHandle, [Egl.NONE]);
         if (eglDisplay == IntPtr.Zero) throw new InvalidOperationException($"eglGetPlatformDisplayEXT 0x{egl.GetError():x}");
         if (egl.Initialize(eglDisplay, out _, out _) == 0)
             throw new InvalidOperationException($"eglInitialize 0x{egl.GetError():x}");
@@ -466,11 +526,32 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         disposed = true;
 
         if (mpv != IntPtr.Zero) MpvNative.mpv_wakeup(mpv);
-        eventThread?.Join(3000);
+        var eventJoined = eventThread is null || eventThread.Join(3000);
 
         wake.Set();
-        renderThread?.Join(3000); // frees the render context on its own thread, per the recipe
+        var renderJoined = renderThread is null || renderThread.Join(3000); // frees the render context on its own thread, per the recipe
 
+        Loaded -= OnLoaded;
+
+        if (!eventJoined || !renderJoined)
+        {
+            // A wedged thread may still be inside mpv_wait_event / Present / mpv_render_context_render
+            // — still touching the mpv handle, the immediate D3D11 context, or the swap chain.
+            // Destroying/releasing any of them now would race that thread and crash the process.
+            // Leak instead: a wedged native thread was never coming back regardless, and a leak beats
+            // a use-after-free crash.
+            Log($"dispose: thread join timed out (event joined={eventJoined}, render joined={renderJoined}) — leaking native handles to avoid a use-after-free");
+            return;
+        }
+
+        TeardownNativeState();
+    }
+
+    /// mpv_terminate_destroy, detach the swap chain, release the D3D11 objects. Only safe to call
+    /// once nothing else (in particular the render thread) can still be touching them — i.e. after
+    /// both threads have been confirmed joined, or before either was ever started.
+    private void TeardownNativeState()
+    {
         if (mpv != IntPtr.Zero) MpvNative.mpv_terminate_destroy(mpv);
         mpv = IntPtr.Zero;
 
@@ -483,11 +564,18 @@ public sealed class MpvPlayerHost : Grid, IDisposable
             Com.Release(swapChain);
         }
         if (deviceContext != IntPtr.Zero) Com.Release(deviceContext);
-        if (device != IntPtr.Zero) Com.Release(device);
+        if (device != IntPtr.Zero)
+        {
+            var refCount = Com.Release(device);
+            Log($"device release refcount={refCount}");
+        }
         swapChain = deviceContext = device = IntPtr.Zero;
-
-        Loaded -= OnLoaded;
     }
+
+    // MARK: logging — best-effort, append-only (WatchProgressSync's own pattern): a leaked-on-
+    // purpose pipeline or a half-built one that got torn down should leave a trail, not vanish.
+    private static void Log(string message) =>
+        WinTube.Core.Sync.WatchProgressSync.LogTo(WinTube.App.Session.DataDirectory, $"MpvPlayerHost: {message}");
 
     [DllImport("d3d11.dll")]
     private static extern int D3D11CreateDevice(IntPtr adapter, int driverType, IntPtr software, uint flags,
@@ -560,7 +648,7 @@ internal static class Com
         return result;
     }
 
-    public static void Release(IntPtr obj) => Slot<ReleaseFn>(obj, 2)(obj);
+    public static uint Release(IntPtr obj) => Slot<ReleaseFn>(obj, 2)(obj);
 
     public static void Check(int hr, string what)
     {
@@ -579,6 +667,7 @@ internal sealed class Egl
     private readonly IntPtr lib;
     private readonly GetProcAddressFn getProcAddress;
     public readonly CreateDeviceANGLEFn CreateDeviceANGLE;
+    public readonly ReleaseDeviceANGLEFn ReleaseDeviceANGLE;
     public readonly GetPlatformDisplayEXTFn GetPlatformDisplayEXT;
     public readonly InitializeFn Initialize;
     public readonly ChooseConfigFn ChooseConfig;
@@ -593,6 +682,7 @@ internal sealed class Egl
 
     public delegate IntPtr GetProcAddressFn([MarshalAs(UnmanagedType.LPStr)] string name);
     public delegate IntPtr CreateDeviceANGLEFn(int deviceType, IntPtr nativeDevice, IntPtr attribs);
+    public delegate int ReleaseDeviceANGLEFn(IntPtr device);
     public delegate IntPtr GetPlatformDisplayEXTFn(int platform, IntPtr nativeDisplay, int[] attribs);
     public delegate int InitializeFn(IntPtr display, out int major, out int minor);
     public delegate int ChooseConfigFn(IntPtr display, int[] attribs, [Out] IntPtr[] configs, int size, out int count);
@@ -610,6 +700,7 @@ internal sealed class Egl
         this.lib = lib;
         getProcAddress = Export<GetProcAddressFn>("EGL_GetProcAddress");
         CreateDeviceANGLE = Export<CreateDeviceANGLEFn>("EGL_CreateDeviceANGLE");
+        ReleaseDeviceANGLE = Export<ReleaseDeviceANGLEFn>("EGL_ReleaseDeviceANGLE");
         GetPlatformDisplayEXT = Export<GetPlatformDisplayEXTFn>("EGL_GetPlatformDisplayEXT");
         Initialize = Export<InitializeFn>("EGL_Initialize");
         ChooseConfig = Export<ChooseConfigFn>("EGL_ChooseConfig");

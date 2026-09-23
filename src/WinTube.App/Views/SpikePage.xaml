@@ -13,6 +13,7 @@
             <Button x:Name="StopButton" Content="Stop" Click="OnStop"/>
             <Button Content="Pause/Play" Click="OnTogglePause"/>
             <Button Content="Seek +10s" Click="OnSeekForward"/>
+            <Button Content="Seek Near End" Click="OnSeekNearEnd"/>
             <Button Content="Vol -" Click="OnVolumeDown"/>
             <Button Content="Vol +" Click="OnVolumeUp"/>
             <Button Content="Speed -" Click="OnSpeedDown"/>
