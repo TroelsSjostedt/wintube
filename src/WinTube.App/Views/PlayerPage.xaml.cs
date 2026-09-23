@@ -262,12 +262,17 @@ public sealed partial class PlayerPage : Page
         stallTimer.Start();
     }
 
+    /// Pure lookup, no side effects — lets SetPreferredHeight check whether a preference change
+    /// actually lands on a different rung before touching activeQuality/disk/mpv.
+    private HlsQuality ResolveQuality(int? height) =>
+        height is { } wanted
+            ? (hlsQualities.FirstOrDefault(q => q.Height <= wanted) ?? hlsQualities[^1])
+            : HlsVariantParser.AutoQuality(hlsQualities, ScreenHeight())!;
+
     /// mpv reads manifests from disk happily; one scratch file per page, overwritten per load.
     private string WriteManifestForHeight(int? height)
     {
-        var quality = height is { } wanted
-            ? (hlsQualities.FirstOrDefault(q => q.Height <= wanted) ?? hlsQualities[^1])
-            : HlsVariantParser.AutoQuality(hlsQualities, ScreenHeight())!;
+        var quality = ResolveQuality(height);
         activeQuality = quality;
         var path = Path.Combine(Session.DataDirectory, "current.m3u8");
         File.WriteAllText(path, HlsVariantParser.FilterToBandwidth(hlsMaster!, quality.Bandwidth));
@@ -676,19 +681,24 @@ public sealed partial class PlayerPage : Page
         UpdateQualityLabel();
     }
 
-    /// Stores the choice; on an adaptive stream with a live player, reloads immediately at the
-    /// new rung. Non-adaptive streams (a Short's single-file fallback) have no clickable items to
-    /// reach this with. A switch that lands mid-teardown/retry (Player null) is stored only —
-    /// the next PlayAsync's WriteManifestForHeight picks it up. The no-op check compares against
-    /// the RESOLVED rung (activeQuality), not the raw preference — a stale preference from a
-    /// taller video must not force a pointless reload when the clicked item is already what's
-    /// playing. Auto has no resolved height to compare, so it's a no-op only when already Auto.
+    /// Mode (Auto vs a manual pin) and playback are independent, so the stored choice always
+    /// changes and the label/checked item always follow it — the ONLY thing that's conditional
+    /// is whether mpv needs to reload. Pinning the exact rung Auto is already showing (or Auto
+    /// resolving back to a rung that was pinned) must still flip the label and pin/unpin the
+    /// mode, just without touching mpv, since the manifest on disk wouldn't change. Re-clicking
+    /// the identical stored preference is the only true no-op (nothing changed at all). Non-
+    /// adaptive streams and a switch landing mid-teardown/retry (Player null) store only — the
+    /// next PlayAsync's WriteManifestForHeight picks the preference up.
     private void SetPreferredHeight(int? height)
     {
-        var isNoOp = height is { } wanted ? wanted == activeQuality?.Height : preferredHeight is null;
-        if (isNoOp) return;
+        if (height == preferredHeight) return;
         preferredHeight = height;
         if (hlsMaster is null || Player is null) return;
+        if (ResolveQuality(height).Height == activeQuality?.Height)
+        {
+            UpdateQualityLabel();
+            return;
+        }
         ReloadAtCurrentQuality();
     }
 
