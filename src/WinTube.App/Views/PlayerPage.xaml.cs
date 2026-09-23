@@ -7,9 +7,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.ApplicationModel.DataTransfer;
-using Windows.Media.Core;
-using Windows.Media.Playback;
-using Windows.Media.Streaming.Adaptive;
+using WinTube.App.Mpv;
 using WinTube.Core.InnerTube;
 using WinTube.Core.Links;
 using WinTube.Core.Models;
@@ -20,8 +18,9 @@ namespace WinTube.App.Views;
 
 /// Full-window playback: resolves a stream for the navigated VideoItem, plays it with resume
 /// and periodic progress recording, and retries once up the client ladder if playback never
-/// starts. Ports the tvOS player contract onto MediaPlayerElement; the source-building logic is
-/// exactly what SpikePage (Task 0) proved works against YouTube's HLS.
+/// starts. Ports the tvOS player contract onto MpvPlayerHost, the libmpv-backed control that
+/// replaced MediaPlayerElement; the source-building logic is exactly what SpikePage (Task 0)
+/// proved works against YouTube's HLS.
 public sealed partial class PlayerPage : Page
 {
     private readonly DispatcherQueue dispatcher = DispatcherQueue.GetForCurrentThread();
@@ -29,30 +28,34 @@ public sealed partial class PlayerPage : Page
     private VideoItem? video;
     private TimeSpan? startAt;
     private TimeSpan flyoutPosition;
-    private MediaPlayer? player;
+
+    /// The live mpv instance, or null between OnNavigatedTo and the first PlayAsync, or while
+    /// torn down. Constructed fresh per PlayAsync attempt — a ladder retry never reuses a host
+    /// whose start failed, it disposes it and builds a new one.
+    private MpvPlayerHost? Player;
+    public double CurrentPositionSeconds => Player!.Position;
+
     private DispatcherQueueTimer? progressTimer;
     private DispatcherQueueTimer? stallTimer;
     private ClientKind? lastClient;
-    private string? originalAudioLanguage;
+    private string? lastUserAgent;
+    private string? lastAudioLanguage;
     private bool retried;
     private bool hasPlayed;
     private bool handledFailure;
     private bool leftPage;
 
-    private DispatcherQueueTimer? volumeSaveTimer;
-    private double pendingVolume;
-
     // MARK: quality picker state
-    private AdaptiveMediaSource? adaptiveSource;
+    private string? hlsMaster;
     private IReadOnlyList<HlsVariant> hlsVariants = [];
     private IReadOnlyList<HlsQuality> hlsQualities = [];
+    private HlsQuality? activeQuality;
     /// The session-wide choice, as on youtube.com: null is Auto; a height pins the nearest
     /// rung at or below it on every video until the app closes. Deliberately not persisted.
     private static int? preferredHeight;
 
     private IReadOnlyList<SponsorSegment> sponsorSegments = [];
     private readonly HashSet<string> sponsorSkipped = [];
-    private DispatcherQueueTimer? sponsorTimer;
     private DispatcherQueueTimer? toastTimer;
 
     // MARK: comments
@@ -96,7 +99,6 @@ public sealed partial class PlayerPage : Page
         App.Session.ProgressSync?.FlushNow();
         TearDownPlayer();
 
-        sponsorTimer?.Stop();
         toastTimer?.Stop();
         sponsorSegments = [];
         sponsorSkipped.Clear();
@@ -127,20 +129,16 @@ public sealed partial class PlayerPage : Page
 
     private async Task PlayAsync(ResolvedStream stream)
     {
-        MediaSource source;
+        string target;
         if (stream.IsAdaptive)
         {
-            // The raw manifest now carries VP9 rungs that Media Foundation's HLS pipeline
-            // refuses outright (SourceNotSupported on open), so the master playlist is
-            // fetched, filtered to its H.264 rungs, and handed to AdaptiveMediaSource as
-            // text — the variant URIs are absolute, so the base uri is just bookkeeping.
-            string filtered;
+            string master;
             try
             {
                 using var manifestRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(stream.Url.ToString()));
                 manifestRequest.Headers.TryAddWithoutValidation("User-Agent", stream.UserAgent);
                 var manifestResponse = await App.Http.SendAsync(manifestRequest);
-                filtered = HlsVariantParser.FilterToAvc(await manifestResponse.Content.ReadAsStringAsync());
+                master = await manifestResponse.Content.ReadAsStringAsync();
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
             {
@@ -150,68 +148,94 @@ public sealed partial class PlayerPage : Page
             }
             if (leftPage) return;
 
-            var http = new Windows.Web.Http.HttpClient();
-            http.DefaultRequestHeaders.TryAppendWithoutValidation("User-Agent", stream.UserAgent);
-            var manifestStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(filtered));
-            var result = await AdaptiveMediaSource.CreateFromStreamAsync(
-                manifestStream.AsInputStream(), new Uri(stream.Url.ToString()),
-                "application/vnd.apple.mpegurl", http);
-            if (leftPage) return;
-            if (result.Status != AdaptiveMediaSourceCreationStatus.Success)
-            {
-                await RetryOrFailAsync($"Adaptive stream failed: {result.Status}");
-                return;
-            }
-            source = MediaSource.CreateFromAdaptiveMediaSource(result.MediaSource);
-            adaptiveSource = result.MediaSource;
-            adaptiveSource.PlaybackBitrateChanged += OnPlaybackBitrateChanged;
-            hlsVariants = HlsVariantParser.Parse(filtered);
+            hlsMaster = master;
+            hlsVariants = HlsVariantParser.Parse(master);
             hlsQualities = HlsVariantParser.QualityLevels(hlsVariants);
+            target = WriteManifestForHeight(preferredHeight);   // Task 8 fills the picker UI; the mechanism lands here
             BuildQualityMenu();
         }
         else
         {
             // The muxed fallback has exactly one quality; the picker just says so.
-            source = MediaSource.CreateFromUri(new Uri(stream.Url.ToString()));
-            adaptiveSource = null;
+            hlsMaster = null;
+            hlsVariants = [];
+            hlsQualities = [];
+            activeQuality = null;
+            target = stream.Url.ToString();
             QualityLabel.Text = "360p";
             QualityButton.IsEnabled = false;
             QualityButton.Visibility = Visibility.Visible;
         }
 
-        originalAudioLanguage = stream.OriginalAudioLanguage;
         hasPlayed = false;
         handledFailure = false;
+        var resume = startAt?.TotalSeconds ?? App.Session.Progress.ResumePosition(video!.Id) ?? 0;
+        startAt = null;
+        lastUserAgent = stream.UserAgent;
+        lastAudioLanguage = stream.OriginalAudioLanguage;
 
-        var playbackItem = new MediaPlaybackItem(source);
-        var mediaPlayer = new MediaPlayer
-        {
-            AutoPlay = true,
-            Volume = App.Session.PlayerSettings.LoadVolume(),
-        };
-        mediaPlayer.MediaOpened += OnMediaOpened;
-        mediaPlayer.MediaFailed += OnMediaFailed;
-        mediaPlayer.VolumeChanged += OnVolumeChanged;
-        mediaPlayer.PlaybackSession.PlaybackStateChanged += OnPlaybackStateChanged;
-        mediaPlayer.Source = playbackItem;
-
-        // Attached immediately: an HLS source never reaches MediaOpened in a detached
-        // MediaPlayer (the same hang the preview work uncovered), so late attachment sent
-        // every video down the 360p fallback. The error-flash this reintroduces is handled
-        // by keeping the element hidden until the media opens instead.
-        player = mediaPlayer;
-        Player.Visibility = Visibility.Collapsed;
-        Player.SetMediaPlayer(mediaPlayer);
+        CreatePlayerHost();
+        Player!.Volume = App.Session.PlayerSettings.LoadVolume();
+        Player.Load(target, resume, stream.UserAgent, stream.OriginalAudioLanguage);
 
         stallTimer = dispatcher.CreateTimer();
         stallTimer.Interval = TimeSpan.FromSeconds(10);
         stallTimer.IsRepeating = false;
-        stallTimer.Tick += (_, _) =>
-        {
-            if (hasPlayed) return;
-            _ = RetryOrFailAsync("Playback did not start.");
-        };
+        stallTimer.Tick += (_, _) => { if (!hasPlayed) _ = RetryOrFailAsync("Playback did not start."); };
         stallTimer.Start();
+    }
+
+    /// mpv reads manifests from disk happily; one scratch file per page, overwritten per load.
+    private string WriteManifestForHeight(int? height)
+    {
+        var quality = height is { } wanted
+            ? (hlsQualities.FirstOrDefault(q => q.Height <= wanted) ?? hlsQualities[^1])
+            : HlsVariantParser.AutoQuality(hlsQualities, ScreenHeight())!;
+        activeQuality = quality;
+        var path = Path.Combine(Session.DataDirectory, "current.m3u8");
+        File.WriteAllText(path, HlsVariantParser.FilterToBandwidth(hlsMaster!, quality.Bandwidth));
+        return path;
+    }
+
+    private int ScreenHeight()
+    {
+        var area = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(App.MainWindowId, Microsoft.UI.Windowing.DisplayAreaFallback.Nearest);
+        return area.OuterBounds.Height;
+    }
+
+    /// One mpv instance per playback attempt: a ladder retry's TearDownPlayer disposes the
+    /// failed host before StartAsync loops back into PlayAsync, so this never reuses a host
+    /// that failed to start. Events are wired per instance and guarded by a `host == Player`
+    /// check, so a stale host's already-queued callback can never touch state after a fresher
+    /// host has replaced it.
+    private void CreatePlayerHost()
+    {
+        if (Player is { } stale)
+        {
+            PlayerSlot.Children.Remove(stale);
+            stale.Dispose();
+        }
+
+        var host = new MpvPlayerHost();
+        host.Opened += () =>
+        {
+            if (leftPage || host != Player) return;
+            HideOverlays();
+            if (!hasPlayed)
+            {
+                hasPlayed = true;
+                stallTimer?.Stop();
+                App.Session.History.Record(video!);
+                StartProgressTimer();
+                _ = LoadSponsorSegmentsAsync();
+            }
+        };
+        host.PositionChanged += _ => { if (host == Player) OnPlayerPosition(); };
+        host.EndReached += () => { if (host == Player) ReportProgressOnce(); };
+        host.Errored += message => { if (!leftPage && host == Player) _ = RetryOrFailAsync(message); };
+
+        Player = host;
+        PlayerSlot.Children.Insert(0, host);
     }
 
     private async Task RetryOrFailAsync(string reason)
@@ -234,70 +258,7 @@ public sealed partial class PlayerPage : Page
         await StartAsync(after: lastClient);
     }
 
-    // MARK: MediaPlayer event handlers — all fire on a background thread, marshal to the UI
-    // thread before touching anything visual or any of this page's state.
-
-    private void OnMediaOpened(MediaPlayer sender, object args) => dispatcher.TryEnqueue(() =>
-    {
-        if (leftPage || player != sender) return;
-
-        Player.Visibility = Visibility.Visible;
-        FixVolumeButtonTooltip();
-
-        var resumeSeconds = startAt?.TotalSeconds ?? App.Session.Progress.ResumePosition(video!.Id);
-        if (resumeSeconds is { } resume)
-            sender.PlaybackSession.Position = TimeSpan.FromSeconds(resume);
-
-        // Applied once — a ladder retry re-entering OnMediaOpened after this must resume from
-        // recorded progress, not re-seek back to the original link timestamp.
-        startAt = null;
-
-        SelectOriginalAudioTrack(sender);
-        HideOverlays();
-    });
-
-    private void OnMediaFailed(MediaPlayer sender, MediaPlayerFailedEventArgs args) =>
-        dispatcher.TryEnqueue(() =>
-        {
-            if (leftPage || player != sender) return;
-            var message = string.IsNullOrEmpty(args.ErrorMessage) ? args.Error.ToString() : args.ErrorMessage;
-            _ = RetryOrFailAsync(message);
-        });
-
-    private void OnPlaybackStateChanged(MediaPlaybackSession sender, object args) =>
-        dispatcher.TryEnqueue(() =>
-        {
-            if (leftPage || player is not { } current || current.PlaybackSession != sender) return;
-            if (sender.PlaybackState != MediaPlaybackState.Playing) return;
-
-            stallTimer?.Stop();
-            HideOverlays();
-            if (!hasPlayed)
-            {
-                hasPlayed = true;
-                App.Session.History.Record(video!);
-                StartProgressTimer();
-                _ = LoadSponsorSegmentsAsync();
-            }
-        });
-
-    /// Walks the track list YouTube's dubs leave with no default and selects the video's own
-    /// audio track — otherwise alphabetical order wins.
-    private void SelectOriginalAudioTrack(MediaPlayer mediaPlayer)
-    {
-        if (originalAudioLanguage is not { } language) return;
-        if (mediaPlayer.Source is not MediaPlaybackItem item) return;
-
-        var tracks = item.AudioTracks;
-        for (var i = 0; i < tracks.Count; i++)
-        {
-            if (tracks[i].Language.StartsWith(language, StringComparison.OrdinalIgnoreCase))
-            {
-                tracks.SelectedIndex = i;
-                return;
-            }
-        }
-    }
+    private void TogglePlayPause() => Player?.TogglePause();
 
     // MARK: progress
 
@@ -313,9 +274,8 @@ public sealed partial class PlayerPage : Page
 
     private void ReportProgressOnce()
     {
-        if (video is null || player is not { } p) return;
-        var session = p.PlaybackSession;
-        App.Session.Progress.Report(video.Id, session.Position.TotalSeconds, session.NaturalDuration.TotalSeconds);
+        if (video is null || Player is not { } p || p.Duration <= 0) return;
+        App.Session.Progress.Report(video.Id, p.Position, p.Duration);
     }
 
     // MARK: SponsorBlock
@@ -328,45 +288,30 @@ public sealed partial class PlayerPage : Page
         var segments = await App.Session.SponsorBlock.FetchSegmentsAsync(video!.Id);
         if (leftPage || segments.Count == 0) return;
         sponsorSegments = segments;
-        StartSponsorTimer();
     }
 
-    /// Polls rather than using position events: a resume landing mid-sponsor or the user
-    /// scrubbing into one would sail straight past a start-boundary event. A quarter-second
-    /// tick is one comparison against a handful of ranges. The Tick handler is subscribed only
-    /// the first time the timer is created, so a ladder retry re-entering this method never
-    /// stacks a second handler.
-    private void StartSponsorTimer()
+    /// Runs on every mpv position update instead of a 250 ms poll — PositionChanged fires at
+    /// least that often during normal playback and also on every seek, so a resume landing
+    /// mid-sponsor or the user scrubbing into one is still caught.
+    private void OnPlayerPosition()
     {
-        if (sponsorTimer is null)
-        {
-            sponsorTimer = dispatcher.CreateTimer();
-            sponsorTimer.Interval = TimeSpan.FromMilliseconds(250);
-            sponsorTimer.Tick += OnSponsorTick;
-        }
-        sponsorTimer.Start();
-    }
-
-    private void OnSponsorTick(DispatcherQueueTimer sender, object args)
-    {
-        if (leftPage || player?.PlaybackSession is not { } session) return;
-        if (session.PlaybackState != MediaPlaybackState.Playing) return;
-        var time = session.Position.TotalSeconds;
+        if (leftPage || Player is not { } p || p.IsPaused) return;
+        var time = p.Position;
         if (SponsorSegment.NextToSkip(sponsorSegments, time, sponsorSkipped) is not { } segment)
             return;
 
         sponsorSkipped.Add(segment.Id);
         // A segment running to the end has nothing to seek to — clamping to the duration
         // parks playback at the last frame, which is what "the video is over" looks like.
-        var duration = session.NaturalDuration.TotalSeconds;
+        var duration = p.Duration;
         var target = duration > 0 ? Math.Min(segment.End, duration) : segment.End;
-        session.Position = TimeSpan.FromSeconds(target);
+        p.SeekTo(target);
         ShowSkipToast($"Skipped {segment.Category.DisplayName()} · {segment.Duration:F0}s");
     }
 
     /// A newer skip replaces the toast and owns its timer, so back-to-back skips don't have
     /// the first skip's timer hide the second skip's message. The hide-toast Tick handler is
-    /// subscribed only the first time the timer is created, mirroring the sponsor timer above.
+    /// subscribed only the first time the timer is created.
     private void ShowSkipToast(string message)
     {
         SkipToastText.Text = message;
@@ -386,36 +331,17 @@ public sealed partial class PlayerPage : Page
 
     private void TearDownPlayer()
     {
-        if (adaptiveSource is { } source)
-            source.PlaybackBitrateChanged -= OnPlaybackBitrateChanged;
-        adaptiveSource = null;
-        hlsVariants = [];
-        hlsQualities = [];
-        QualityButton.Visibility = Visibility.Collapsed;
-
-        // A volume change still waiting out its debounce is flushed now — leaving the page
-        // must not lose the last adjustment.
-        if (volumeSaveTimer is { IsRunning: true })
-        {
-            volumeSaveTimer.Stop();
-            App.Session.PlayerSettings.SaveVolume(pendingVolume);
-        }
-
         progressTimer?.Stop();
         progressTimer = null;
         stallTimer?.Stop();
         stallTimer = null;
 
-        if (player is { } p)
+        if (Player is { } p)
         {
-            p.MediaOpened -= OnMediaOpened;
-            p.MediaFailed -= OnMediaFailed;
-            p.VolumeChanged -= OnVolumeChanged;
-            p.PlaybackSession.PlaybackStateChanged -= OnPlaybackStateChanged;
-            Player.SetMediaPlayer(null);
+            PlayerSlot.Children.Remove(p);
             p.Dispose();
         }
-        player = null;
+        Player = null;
     }
 
     private void ShowLoading()
@@ -442,33 +368,9 @@ public sealed partial class PlayerPage : Page
 
     private void OnBack(object sender, RoutedEventArgs e) => Frame.GoBack();
 
-    /// Debounced volume persistence: the transport slider fires VolumeChanged per notch of a
-    /// drag, so the write waits half a second after the last change. Saving here (rather than
-    /// only on page exit) also survives the window being closed mid-playback.
-    private void OnVolumeChanged(MediaPlayer sender, object args) => dispatcher.TryEnqueue(() =>
-    {
-        if (player != sender) return;
-        var volume = sender.Volume;
-        volumeSaveTimer ??= CreateVolumeSaveTimer();
-        pendingVolume = volume;
-        volumeSaveTimer.Stop();
-        volumeSaveTimer.Start();
-    });
-
-    private DispatcherQueueTimer CreateVolumeSaveTimer()
-    {
-        var timer = dispatcher.CreateTimer();
-        timer.Interval = TimeSpan.FromMilliseconds(500);
-        timer.IsRepeating = false;
-        timer.Tick += (_, _) => App.Session.PlayerSettings.SaveVolume(pendingVolume);
-        return timer;
-    }
-
     // MARK: quality picker
 
     /// Builds the picker from the filtered manifest's rungs: Auto plus one entry per height.
-    /// AdaptiveMediaSource only exposes bitrates, so the parsed variants are what map them
-    /// to 360p/720p/1080p labels.
     private void BuildQualityMenu()
     {
         if (hlsQualities.Count == 0) return;
@@ -492,83 +394,37 @@ public sealed partial class PlayerPage : Page
 
         QualityButton.IsEnabled = true;
         QualityButton.Visibility = Visibility.Visible;
-        ApplyPreferredHeight();
+        UpdateQualityLabel();
     }
 
+    /// Stores the choice for the next video's WriteManifestForHeight call and relabels from
+    /// whatever is already loaded — switching the running playback live is Task 8.
     private void SetPreferredHeight(int? height)
     {
         preferredHeight = height;
-        ApplyPreferredHeight();
+        UpdateQualityLabel();
     }
 
-    /// Pins the nearest rung at or below the preferred height (or the lowest on offer), or
-    /// releases the pin for Auto. Pinning is exact-bandwidth: min = max = the rung's own
-    /// BANDWIDTH, which AdaptiveMediaSource resolves to exactly that variant.
-    private void ApplyPreferredHeight()
+    private void UpdateQualityLabel()
     {
-        if (adaptiveSource is not { } source) return;
-        if (preferredHeight is { } wanted)
-        {
-            var quality = hlsQualities.FirstOrDefault(q => q.Height <= wanted) ?? hlsQualities[^1];
-            source.DesiredMinBitrate = quality.Bandwidth;
-            source.DesiredMaxBitrate = quality.Bandwidth;
-            QualityLabel.Text = quality.Label;
-        }
-        else
-        {
-            source.DesiredMinBitrate = null;
-            source.DesiredMaxBitrate = null;
-            QualityLabel.Text = CurrentAutoLabel(source.CurrentPlaybackBitrate);
-        }
-    }
-
-    /// Fires on a background thread whenever Auto shifts rung; the label follows along.
-    private void OnPlaybackBitrateChanged(AdaptiveMediaSource sender, AdaptiveMediaSourcePlaybackBitrateChangedEventArgs args) =>
-        dispatcher.TryEnqueue(() =>
-        {
-            if (leftPage || adaptiveSource != sender || preferredHeight is not null) return;
-            QualityLabel.Text = CurrentAutoLabel(args.NewValue);
-        });
-
-    private string CurrentAutoLabel(uint bitrate) =>
-        hlsVariants.FirstOrDefault(v => v.Bandwidth == bitrate) is { } variant
-            ? $"Auto · {variant.Height}p" : "Auto";
-
-    /// The transport controls label their volume button with the platform's "Mute" tooltip,
-    /// but clicking it opens the volume flyout — the actual mute button lives inside that
-    /// flyout. Relabel it once the template exists (idempotent; runs on every media open).
-    private void FixVolumeButtonTooltip()
-    {
-        if (FindDescendant(Player, "VolumeMuteButton") is { } volumeButton)
-            ToolTipService.SetToolTip(volumeButton, "Volume");
-    }
-
-    private static DependencyObject? FindDescendant(DependencyObject root, string name)
-    {
-        for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root); i++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
-            if (child is FrameworkElement { } element && element.Name == name) return child;
-            if (FindDescendant(child, name) is { } found) return found;
-        }
-        return null;
+        if (activeQuality is not { } quality) return;
+        QualityLabel.Text = preferredHeight is null ? $"Auto · {quality.Height}p" : quality.Label;
     }
 
     /// Clicking the video surface toggles play/pause. Tapped bubbles up from the transport
-    /// controls too, and their invisible root layout spans the full frame — so instead of
-    /// fencing off the controls as a region, only a tap that actually landed on an
+    /// controls too (Task 6), and their invisible root layout spans the full frame — so instead
+    /// of fencing off the controls as a region, only a tap that actually landed on an
     /// interactive control (a button, a slider) is left alone.
     private void OnPlayerTapped(object sender, TappedRoutedEventArgs e)
     {
-        if (player is not { } p) return;
+        if (Player is null) return;
         for (var element = e.OriginalSource as DependencyObject; element is not null;
              element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element))
         {
             if (element is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase
                 or Microsoft.UI.Xaml.Controls.Primitives.RangeBase) return;
         }
-        if (p.PlaybackSession.PlaybackState == MediaPlaybackState.Playing) p.Pause();
-        else p.Play();
+        TogglePlayPause();
     }
 
     // MARK: channel link
@@ -594,7 +450,7 @@ public sealed partial class PlayerPage : Page
     /// says is exactly what a click copies.
     private void OnCopyFlyoutOpening(object sender, object e)
     {
-        flyoutPosition = player?.PlaybackSession?.Position ?? TimeSpan.Zero;
+        flyoutPosition = Player is { } p ? TimeSpan.FromSeconds(p.Position) : TimeSpan.Zero;
         CopyLinkAtItem.Text = $"Copy link at {YouTubeLink.Format(flyoutPosition)}";
     }
 

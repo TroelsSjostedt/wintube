@@ -16,6 +16,10 @@ public partial class App : Application
 
     public static MainWindow? Window { get; private set; }
 
+    /// PlayerPage needs the main window's WindowId to look up its DisplayArea (ScreenHeight,
+    /// for Auto quality selection) — the same AppWindow MainWindow already reaches for SetIcon.
+    public static Microsoft.UI.WindowId MainWindowId => Window!.AppWindow.Id;
+
     public App() => InitializeComponent();
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
