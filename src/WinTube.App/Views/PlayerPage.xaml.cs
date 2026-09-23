@@ -661,11 +661,30 @@ public sealed partial class PlayerPage : Page
         UpdateQualityLabel();
     }
 
-    /// Stores the choice for the next video's WriteManifestForHeight call and relabels from
-    /// whatever is already loaded — switching the running playback live is Task 8.
+    /// Stores the choice; on an adaptive stream with a live player, reloads immediately at the
+    /// new rung. Non-adaptive streams (a Short's single-file fallback) have no clickable items to
+    /// reach this with. A switch that lands mid-teardown/retry (Player null) is stored only —
+    /// the next PlayAsync's WriteManifestForHeight picks it up. Re-selecting the already-active
+    /// height is a no-op, so a stray click never re-triggers a reload.
     private void SetPreferredHeight(int? height)
     {
+        if (height == preferredHeight) return;
         preferredHeight = height;
+        if (hlsMaster is null || Player is null) return;
+        ReloadAtCurrentQuality();
+    }
+
+    /// Reloads the already-started host onto the new rung's single-variant manifest, resuming
+    /// from the position it was just showing — mpv's own "loadfile ... replace" on the existing
+    /// MpvPlayerHost, not a fresh host: Load() only builds native state when nothing has started
+    /// yet, so this is cheap and keeps the render pipeline (and its cold-start race, see
+    /// CreatePlayerHost) out of a routine quality switch.
+    private void ReloadAtCurrentQuality()
+    {
+        if (hlsMaster is null || Player is not { } player) return;
+        var position = player.Position;
+        var path = WriteManifestForHeight(preferredHeight);
+        player.Load(path, position, lastUserAgent!, lastAudioLanguage);
         UpdateQualityLabel();
     }
 
