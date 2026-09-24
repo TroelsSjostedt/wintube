@@ -126,4 +126,7 @@ ever regresses.
 
 ## Licence
 
+[GPLv3](LICENSE) — WinTube ships with libmpv, which is GPLv3, so the app is too.
+Third-party licences are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
 Not affiliated with, endorsed by, or connected to YouTube or Google.
