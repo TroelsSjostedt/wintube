@@ -84,6 +84,8 @@ public sealed partial class PlayerPage : Page
     private SponsorSegment? skipCandidate;
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush SponsorMarkerBrush =
         new(Windows.UI.Color.FromArgb(179, 0xE6, 0xC2, 0x1F));   // ~70% opacity caution yellow
+    /// Cached result of GetThumbInset() — set once the live Thumb part has a real ActualWidth.
+    private double? thumbInset;
 
     // MARK: comments
     private readonly ObservableCollection<CommentRowViewModel> commentRows = [];
@@ -651,24 +653,63 @@ public sealed partial class PlayerPage : Page
     /// Rebuilds the yellow segment rectangles over SeekBar from scratch — called on segments
     /// loading, duration becoming known (from UpdateTransport) and SeekBar resizing. Cheap
     /// enough (a handful of segments) to just clear and redraw rather than diff.
+    ///
+    /// A WinUI Slider's track fills the whole control, but the THUMB CENTER only ever travels
+    /// [inset, ActualWidth-inset], inset = half the thumb's width — the same rule mpv's own
+    /// position feeds SeekBar.Value through, so a marker drawn at bare fraction*ActualWidth
+    /// (no inset) sits measurably left of where that time actually lands on the visible track.
+    /// GetThumbInset() reads the live Thumb part so this tracks the real template/theme instead
+    /// of a hardcoded guess.
     private void RenderSponsorMarkers()
     {
         SponsorMarkers.Children.Clear();
         var trackWidth = SeekBar.ActualWidth;
         var duration = markersDuration;
-        if (trackWidth <= 0 || duration <= 0) return;
+        var inset = GetThumbInset();
+        var span = trackWidth - 2 * inset;
+        if (span <= 0 || duration <= 0) return;
 
         foreach (var segment in sponsorSegments)
         {
             var rect = new Microsoft.UI.Xaml.Shapes.Rectangle
             {
-                Width = Math.Max(1, (segment.Duration / duration) * trackWidth),
+                Width = Math.Max(1, segment.Duration / duration * span),
                 Height = 4,
                 Fill = SponsorMarkerBrush,
             };
-            Canvas.SetLeft(rect, segment.Start / duration * trackWidth);
+            Canvas.SetLeft(rect, inset + segment.Start / duration * span);
             SponsorMarkers.Children.Add(rect);
         }
+    }
+
+    /// Half the width of SeekBar's own Thumb part, found once via VisualTreeHelper and cached —
+    /// the Thumb only has a real ActualWidth after the control's template has been applied and
+    /// measured, which is already true by the time RenderSponsorMarkers runs (segments load
+    /// post-Opened; the transport bar, and SeekBar within it, is on screen well before that).
+    /// Falls back to 9 (half of WinUI's SliderHorizontalThumbWidth=18, confirmed in the
+    /// Microsoft.WindowsAppSDK 1.7 generic.xaml this project references) for the rare call that
+    /// somehow lands before the template exists, so markers are never left unrendered.
+    private double GetThumbInset()
+    {
+        if (thumbInset is { } cached) return cached;
+        if (FindDescendant<Microsoft.UI.Xaml.Controls.Primitives.Thumb>(SeekBar) is { ActualWidth: > 0 } thumb)
+        {
+            thumbInset = thumb.ActualWidth / 2;
+            return thumbInset.Value;
+        }
+        return 9;
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        var count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is T match) return match;
+            if (FindDescendant<T>(child) is { } found) return found;
+        }
+        return null;
     }
 
     private void ClearSponsorMarkers()
