@@ -75,6 +75,15 @@ public sealed partial class PlayerPage : Page
     private IReadOnlyList<SponsorSegment> sponsorSegments = [];
     private readonly HashSet<string> sponsorSkipped = [];
     private DispatcherQueueTimer? toastTimer;
+    /// Duration RenderSponsorMarkers last drew against — UpdateTransport compares against this
+    /// on every PositionChanged tick so a rebuild only happens once duration actually changes
+    /// (goes from 0 to known, or a quality reload briefly resets it), not on every tick.
+    private double markersDuration = -1;
+    /// The segment the skip button currently offers, or null while none is upcoming. Set by
+    /// UpdateSkipButtonVisibility, read (and cleared) by OnSkipBlockClick.
+    private SponsorSegment? skipCandidate;
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush SponsorMarkerBrush =
+        new(Windows.UI.Color.FromArgb(179, 0xE6, 0xC2, 0x1F));   // ~70% opacity caution yellow
 
     // MARK: comments
     private readonly ObservableCollection<CommentRowViewModel> commentRows = [];
@@ -136,6 +145,7 @@ public sealed partial class PlayerPage : Page
 
         leftPage = false;
         retried = false;
+        ClearSponsorMarkers();
         _ = StartAsync(after: null);
 
         ResetComments();
@@ -159,6 +169,7 @@ public sealed partial class PlayerPage : Page
         toastTimer?.Stop();
         sponsorSegments = [];
         sponsorSkipped.Clear();
+        ClearSponsorMarkers();
 
         commentsCts?.Cancel();
         commentsCts?.Dispose();
@@ -378,7 +389,7 @@ public sealed partial class PlayerPage : Page
                 host.Pause();
             }
         };
-        host.PositionChanged += _ => { if (host == Player) { OnPlayerPosition(); UpdateTransport(); } };
+        host.PositionChanged += _ => { if (host == Player) { OnPlayerPosition(); UpdateTransport(); UpdateSkipButtonVisibility(); } };
         // time-pos stops ticking the instant playback pauses, so UpdateTransport (driven off
         // PositionChanged) can't be trusted to refresh the play/pause icon — mpv's own "pause"
         // property change is the live signal instead.
@@ -433,6 +444,14 @@ public sealed partial class PlayerPage : Page
         {
             SeekBar.Maximum = p.Duration;
             SeekBar.Value = p.Position;
+        }
+        // Duration is 0 until mpv reports it, then holds steady — comparing against the value
+        // markers were last drawn for catches "duration just became known" without rebuilding
+        // the overlay on every tick.
+        if (Math.Abs(p.Duration - markersDuration) > 0.01)
+        {
+            markersDuration = p.Duration;
+            RenderSponsorMarkers();
         }
     }
 
@@ -626,6 +645,73 @@ public sealed partial class PlayerPage : Page
         var segments = await App.Session.SponsorBlock.FetchSegmentsAsync(video!.Id);
         if (leftPage || segments.Count == 0) return;
         sponsorSegments = segments;
+        RenderSponsorMarkers();
+    }
+
+    /// Rebuilds the yellow segment rectangles over SeekBar from scratch — called on segments
+    /// loading, duration becoming known (from UpdateTransport) and SeekBar resizing. Cheap
+    /// enough (a handful of segments) to just clear and redraw rather than diff.
+    private void RenderSponsorMarkers()
+    {
+        SponsorMarkers.Children.Clear();
+        var trackWidth = SeekBar.ActualWidth;
+        var duration = markersDuration;
+        if (trackWidth <= 0 || duration <= 0) return;
+
+        foreach (var segment in sponsorSegments)
+        {
+            var rect = new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Width = Math.Max(1, (segment.Duration / duration) * trackWidth),
+                Height = 4,
+                Fill = SponsorMarkerBrush,
+            };
+            Canvas.SetLeft(rect, segment.Start / duration * trackWidth);
+            SponsorMarkers.Children.Add(rect);
+        }
+    }
+
+    private void ClearSponsorMarkers()
+    {
+        SponsorMarkers.Children.Clear();
+        markersDuration = -1;
+        skipCandidate = null;
+        SkipBlockButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnSeekBarSizeChanged(object sender, SizeChangedEventArgs e) => RenderSponsorMarkers();
+
+    /// Shows the skip-ahead button while the current position is inside the 10s window before an
+    /// upcoming segment's start; auto-skip (OnPlayerPosition) already handles being inside one, so
+    /// this deliberately excludes Contains(time). Runs alongside OnPlayerPosition off the same
+    /// PositionChanged tick.
+    private void UpdateSkipButtonVisibility()
+    {
+        if (Player is not { } p)
+        {
+            skipCandidate = null;
+            SkipBlockButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+        var time = p.Position;
+        skipCandidate = sponsorSegments.FirstOrDefault(s => time >= s.Start - 10 && time < s.Start);
+        SkipBlockButton.Visibility = skipCandidate is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void OnSkipBlockClick(object sender, RoutedEventArgs e)
+    {
+        if (skipCandidate is not { } segment || Player is not { } p) return;
+        // Same clamp-to-duration as the auto-skip path (OnPlayerPosition).
+        var duration = p.Duration;
+        var target = duration > 0 ? Math.Min(segment.End, duration) : segment.End;
+        p.SeekTo(target);
+        // Mirrors OnPlayerPosition's bookkeeping so a rewind back into this segment plays it
+        // normally instead of being silently re-skipped.
+        sponsorSkipped.Add(segment.Id);
+        ShowSkipToast($"Skipped {segment.Category.DisplayName()} · {segment.Duration:F0}s");
+        skipCandidate = null;
+        SkipBlockButton.Visibility = Visibility.Collapsed;
+        WakeTransport();
     }
 
     /// Runs on every mpv position update instead of a 250 ms poll — PositionChanged fires at

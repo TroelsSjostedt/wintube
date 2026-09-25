@@ -66,8 +66,12 @@
                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Slider x:Name="SeekBar" Grid.Row="0" Minimum="0" StepFrequency="1"
-                        ThumbToolTipValueConverter="{x:Null}"/>
-                <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto">
+                        ThumbToolTipValueConverter="{x:Null}" SizeChanged="OnSeekBarSizeChanged"/>
+                <!-- Sits in the same cell as SeekBar so it tracks the slider's own width; markers
+                     are rebuilt in RenderSponsorMarkers (segments load, duration known, resize). -->
+                <Canvas x:Name="SponsorMarkers" Grid.Row="0" Height="4" VerticalAlignment="Center"
+                        IsHitTestVisible="False"/>
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto">
                     <Button x:Name="PlayPauseButton" Grid.Column="0" Click="OnPlayPauseClick"
                             Background="Transparent" BorderThickness="0">
                         <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE769;" FontSize="16"/>
@@ -83,26 +87,36 @@
                     </Button>
                     <TextBlock x:Name="TimeLabel" Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center"
                                FontSize="13" Text="0:00 / 0:00"/>
+                    <!-- Shown only in the 10s window before an upcoming segment's start; hidden the
+                         rest of the time (UpdateSkipButtonVisibility, driven off PositionChanged). -->
+                    <Button x:Name="SkipBlockButton" Grid.Column="3" Click="OnSkipBlockClick"
+                            Visibility="Collapsed" VerticalAlignment="Center"
+                            Background="Transparent" BorderThickness="0" Margin="12,0,0,0">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE893;" FontSize="14"/>
+                            <TextBlock Text="Skip block"/>
+                        </StackPanel>
+                    </Button>
                     <!-- I1: TitleRow (and the QualityButton/CommentsButton it carries) is Collapsed in
                          fullscreen, so these two mirror it here — Visible only while isFullScreen,
                          Collapsed otherwise (ApplyFullScreen/UpdateBarControlsVisibility). -->
-                    <DropDownButton x:Name="QualityButtonBar" Grid.Column="4" VerticalAlignment="Center"
+                    <DropDownButton x:Name="QualityButtonBar" Grid.Column="5" VerticalAlignment="Center"
                                     Visibility="Collapsed" Background="Transparent" BorderThickness="0" Margin="0,0,4,0">
                         <TextBlock x:Name="QualityLabelBar" Text="Auto"/>
                         <DropDownButton.Flyout>
                             <MenuFlyout x:Name="QualityFlyoutBar"/>
                         </DropDownButton.Flyout>
                     </DropDownButton>
-                    <ToggleButton x:Name="CommentsButtonBar" Grid.Column="5" Click="OnToggleComments"
+                    <ToggleButton x:Name="CommentsButtonBar" Grid.Column="6" Click="OnToggleComments"
                                   Visibility="Collapsed" VerticalAlignment="Center"
                                   Background="Transparent" BorderThickness="0" Margin="0,0,4,0">
                         <FontIcon Glyph="&#xE90A;" FontSize="16"/>
                     </ToggleButton>
-                    <DropDownButton x:Name="SpeedButton" Grid.Column="6" Content="1×"
+                    <DropDownButton x:Name="SpeedButton" Grid.Column="7" Content="1×"
                                     Background="Transparent" BorderThickness="0" Margin="0,0,4,0">
                         <DropDownButton.Flyout><MenuFlyout x:Name="SpeedFlyout"/></DropDownButton.Flyout>
                     </DropDownButton>
-                    <Button x:Name="FullScreenButton" Grid.Column="7" Click="OnFullScreenClick"
+                    <Button x:Name="FullScreenButton" Grid.Column="8" Click="OnFullScreenClick"
                             Background="Transparent" BorderThickness="0">
                         <FontIcon x:Name="FullScreenIcon" Glyph="&#xE740;" FontSize="16"/>
                     </Button>
