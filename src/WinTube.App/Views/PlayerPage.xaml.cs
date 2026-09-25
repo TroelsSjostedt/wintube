@@ -681,10 +681,12 @@ public sealed partial class PlayerPage : Page
 
     private void OnSeekBarSizeChanged(object sender, SizeChangedEventArgs e) => RenderSponsorMarkers();
 
-    /// Shows the skip-ahead button while the current position is inside the 10s window before an
-    /// upcoming segment's start; auto-skip (OnPlayerPosition) already handles being inside one, so
-    /// this deliberately excludes Contains(time). Runs alongside OnPlayerPosition off the same
-    /// PositionChanged tick.
+    /// Shows the skip-ahead button from 10s before a segment's start through its end. Also stays
+    /// visible INSIDE a segment: sponsorSkipped's skip-once rule means auto-skip (OnPlayerPosition)
+    /// won't fire again for a segment the user has already rewound back into, so the button is the
+    /// only way to jump past it a second time. When several segments match (overlap/adjacency),
+    /// the one with the furthest End wins — that's the single seek that clears all of them. Runs
+    /// alongside OnPlayerPosition off the same PositionChanged tick.
     private void UpdateSkipButtonVisibility()
     {
         if (Player is not { } p)
@@ -694,7 +696,10 @@ public sealed partial class PlayerPage : Page
             return;
         }
         var time = p.Position;
-        skipCandidate = sponsorSegments.FirstOrDefault(s => time >= s.Start - 10 && time < s.Start);
+        skipCandidate = sponsorSegments
+            .Where(s => time >= s.Start - 10 && time < s.End)
+            .OrderByDescending(s => s.End)
+            .FirstOrDefault();
         SkipBlockButton.Visibility = skipCandidate is null ? Visibility.Collapsed : Visibility.Visible;
     }
 

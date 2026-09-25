@@ -87,8 +87,9 @@
                     </Button>
                     <TextBlock x:Name="TimeLabel" Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center"
                                FontSize="13" Text="0:00 / 0:00"/>
-                    <!-- Shown only in the 10s window before an upcoming segment's start; hidden the
-                         rest of the time (UpdateSkipButtonVisibility, driven off PositionChanged). -->
+                    <!-- Shown from 10s before a segment's start through its end (so it stays
+                         reachable even inside an already-auto-skipped block); hidden otherwise
+                         (UpdateSkipButtonVisibility, driven off PositionChanged). -->
                     <Button x:Name="SkipBlockButton" Grid.Column="3" Click="OnSkipBlockClick"
                             Visibility="Collapsed" VerticalAlignment="Center"
                             Background="Transparent" BorderThickness="0" Margin="12,0,0,0">
