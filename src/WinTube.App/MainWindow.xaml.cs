@@ -169,6 +169,10 @@ public sealed partial class MainWindow : Window
     /// device — throttled so switching apps back and forth doesn't hammer the backend.
     private void OnActivated(object sender, WindowActivatedEventArgs e)
     {
+        // First Activated, not the constructor: WinUI 3's own child HWNDs (the content bridge
+        // and its input site — see SubclassInputChildWindowsOnce) don't exist yet when the
+        // constructor runs, only once the window's content has actually been realized.
+        SubclassInputChildWindowsOnce();
         if (e.WindowActivationState == WindowActivationState.Deactivated) return;
         var now = DateTimeOffset.UtcNow;
         if (now - lastSyncTrigger <= TimeSpan.FromSeconds(60)) return;
@@ -203,9 +207,13 @@ public sealed partial class MainWindow : Window
     // recognizer (Tapped/ItemClick, which is what actually activates a home-page card) is driven
     // off the platform's own pointer/gesture pipeline, generated independently of the Handled
     // flag on the routed PointerPressed event — marking it Handled there doesn't stop XAML from
-    // separately recognizing a tap. So instead this subclasses the window's WndProc and eats the
-    // side-button messages at the Win32 level, before Windows ever turns them into pointer input
-    // XAML can see.
+    // separately recognizing a tap. Win32-level interception has to happen in two places:
+    //  - the input child window WinUI 3 actually delivers WM_XBUTTON* to (SubclassInputChildWindowsOnce
+    //    below) — this is the real fix, since eating it there stops WinUI's own recognizer from
+    //    ever seeing the click;
+    //  - this top-level window's own WndProc (SubclassWindowForMouseBackButton), kept as a
+    //    fallback for WM_APPCOMMAND, which DefWindowProc can still synthesize and bubble up to
+    //    the top level even when the child swallow below handles everything else.
 
     private const int GWLP_WNDPROC = -4;
     private const uint WM_XBUTTONDOWN = 0x020B;
@@ -230,6 +238,14 @@ public sealed partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern IntPtr CallWindowProc(IntPtr prevWndProc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr hWndParent, EnumChildWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+    private delegate bool EnumChildWindowsProc(IntPtr hWnd, IntPtr lParam);
+
     private void SubclassWindowForMouseBackButton()
     {
         var hwnd = WindowNative.GetWindowHandle(this);
@@ -241,24 +257,24 @@ public sealed partial class MainWindow : Window
     {
         switch (msg)
         {
-            // Both buttons, all three variants (down/up/dblclk) are swallowed unconditionally —
-            // returning without calling the original proc stops DefWindowProc from ever
-            // synthesizing a WM_APPCOMMAND out of the press, and since XAML's input pipeline sits
-            // downstream of that same proc chain, it never sees the click at all. XBUTTON1 (back)
-            // navigates on the up-click, matching a normal button press; XBUTTON2 (forward) is
-            // swallowed too (so it can't fall through to a card either) but never navigates.
+            // Believed unreachable in practice: pointer input, including WM_XBUTTON*, is
+            // delivered to WinUI 3's own child HWNDs (see SubclassInputChildWindowsOnce), never
+            // to this top-level one. Left in and swallowed the same way regardless, as a harmless
+            // fallback in case a future WinUI version ever routes it here directly.
             case WM_XBUTTONDOWN or WM_XBUTTONUP or WM_XBUTTONDBLCLK:
                 var xButton = (int)((wParam.ToInt64() >> 16) & 0xFFFF);
-                if (msg == WM_XBUTTONUP && xButton == XBUTTON1) RunOnUiThread(GoBackIfPossible);
+                if (msg == WM_XBUTTONUP && xButton == XBUTTON1) RunOnUiThread(GoBackDebounced);
                 return new IntPtr(1);
 
-            // Some mice/drivers send the browser-back app command directly instead of (or as
-            // well as) WM_XBUTTON*; handled the same way for keyboards with dedicated back keys.
+            // The real fallback: DefWindowProc synthesizes this from an unhandled WM_XBUTTON*, so
+            // it only fires if the child-window swallow below doesn't catch the press first (or
+            // for a driver that sends the app command directly, e.g. a keyboard's dedicated back
+            // key). GoBackDebounced guards against both paths firing for one physical click.
             case WM_APPCOMMAND:
                 var command = (int)((lParam.ToInt64() >> 16) & 0xFFF);
                 if (command == APPCOMMAND_BROWSER_BACKWARD)
                 {
-                    RunOnUiThread(GoBackIfPossible);
+                    RunOnUiThread(GoBackDebounced);
                     return new IntPtr(1);
                 }
                 break;
@@ -266,14 +282,81 @@ public sealed partial class MainWindow : Window
         return CallWindowProc(originalWndProc, hWnd, msg, wParam, lParam);
     }
 
-    private void GoBackIfPossible()
+    private const string BridgeClassName = "Microsoft.UI.Content.DesktopChildSiteBridge";
+    private const string InputSiteClassName = "InputSiteWindowClass";
+
+    // One rooted delegate + original proc per subclassed input-child HWND (same GC-lifetime
+    // reasoning as mouseBackWndProc above).
+    private readonly Dictionary<IntPtr, (WndProc Proc, IntPtr Original)> subclassedInputWindows = new();
+    private bool inputChildWindowsSubclassed;
+
+    /// WinUI 3 hosts its content in child HWNDs of its own — a "Microsoft.UI.Content.
+    /// DesktopChildSiteBridge" wrapping an inner "InputSiteWindowClass" — and pointer input,
+    /// including WM_XBUTTON*, is delivered directly to those, never to the top-level window
+    /// subclassed above (only the WM_APPCOMMAND DefWindowProc synthesizes from an unhandled one
+    /// bubbles up that far). So the actual swallow has to happen down there. Which of the two
+    /// class names is the one that actually receives the message isn't documented, so — per the
+    /// coordinator's "if in doubt, subclass both" — every match of either gets subclassed.
+    /// EnumChildWindows already walks the full descendant tree, not just direct children, so one
+    /// call from the main HWND finds both levels.
+    private void SubclassInputChildWindowsOnce()
     {
+        if (inputChildWindowsSubclassed) return;
+        inputChildWindowsSubclassed = true;
+
+        var mainHwnd = WindowNative.GetWindowHandle(this);
+        var matches = new List<IntPtr>();
+        var classNameBuffer = new System.Text.StringBuilder(256);
+        EnumChildWindows(mainHwnd, (hWnd, _) =>
+        {
+            classNameBuffer.Clear();
+            GetClassName(hWnd, classNameBuffer, classNameBuffer.Capacity);
+            var className = classNameBuffer.ToString();
+            if (className is BridgeClassName or InputSiteClassName) matches.Add(hWnd);
+            return true; // keep enumerating — there can be more than one match (multiple pages/popups).
+        }, IntPtr.Zero);
+
+        foreach (var hWnd in matches)
+        {
+            WndProc proc = InputChildWndProc;
+            var original = SetWindowLongPtr(hWnd, GWLP_WNDPROC, proc);
+            subclassedInputWindows[hWnd] = (proc, original);
+        }
+    }
+
+    private IntPtr InputChildWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        if (msg is WM_XBUTTONDOWN or WM_XBUTTONUP or WM_XBUTTONDBLCLK)
+        {
+            // Swallowed unconditionally for both buttons, all three variants — this is the fix:
+            // returning without forwarding to the original proc keeps WinUI's gesture recognizer
+            // from ever seeing the click, so a card under the pointer can't activate. XBUTTON1
+            // navigates on the up-click; XBUTTON2 is swallowed too but never navigates.
+            var xButton = (int)((wParam.ToInt64() >> 16) & 0xFFFF);
+            if (msg == WM_XBUTTONUP && xButton == XBUTTON1) RunOnUiThread(GoBackDebounced);
+            return new IntPtr(1);
+        }
+        var original = subclassedInputWindows[hWnd].Original;
+        return CallWindowProc(original, hWnd, msg, wParam, lParam);
+    }
+
+    /// Debounced rather than a plain GoBackIfPossible: swallowing XBUTTONUP in the input child
+    /// window should stop DefWindowProc from ever synthesizing the WM_APPCOMMAND the top-level
+    /// fallback above reacts to, for one physical click — but that internal chain isn't
+    /// documented, so this guards against both paths firing for the same press.
+    private DateTime lastMouseBackAt = DateTime.MinValue;
+
+    private void GoBackDebounced()
+    {
+        var now = DateTime.UtcNow;
+        if (now - lastMouseBackAt < TimeSpan.FromMilliseconds(300)) return;
+        lastMouseBackAt = now;
         if (RootFrame.CanGoBack) RootFrame.GoBack();
     }
 
-    /// WndProc runs on the UI thread for this window, so HasThreadAccess is always true in
-    /// practice — the dispatch is defensive, matching the same safe pattern OnSessionSignedOut
-    /// uses below for a callback that genuinely can arrive off-thread.
+    /// WndProc for the top-level window runs on the UI thread; the input child window's may run
+    /// on an input thread instead, so this dispatch is required there and merely defensive here
+    /// — either way it's safe to route every mouse-back trigger through the same helper.
     private void RunOnUiThread(Action action)
     {
         if (dispatcher.HasThreadAccess) action();
