@@ -71,12 +71,15 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
         DurationText.Text = video.Duration;
         DurationBadge.Visibility = video.Duration.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        var hasChannel = video.ChannelId is not null && video.Author.Length > 0;
-        AuthorText.Text = hasChannel ? video.Author : "";
-        AuthorText.Visibility = hasChannel ? Visibility.Visible : Visibility.Collapsed;
-        var rest = hasChannel ? ComposeSubtitle(video with { Author = "" }) : ComposeSubtitle(video);
-        RestText.Text = hasChannel && rest.Length > 0 ? " · " + rest : rest;
-        GoToChannelItem.Visibility = video.ChannelId is not null ? Visibility.Visible : Visibility.Collapsed;
+        // TV-feed "Recommended"/topic tiles never serialize a channel id on the card itself
+        // (only Shorts/Subscriptions tiles do) — the author is still shown and clickable, and
+        // activation resolves the id lazily. See ActivateChannelAsync.
+        var hasAuthor = video.Author.Length > 0;
+        AuthorText.Text = hasAuthor ? video.Author : "";
+        AuthorText.Visibility = hasAuthor ? Visibility.Visible : Visibility.Collapsed;
+        var rest = hasAuthor ? ComposeSubtitle(video with { Author = "" }) : ComposeSubtitle(video);
+        RestText.Text = hasAuthor && rest.Length > 0 ? " · " + rest : rest;
+        GoToChannelItem.Visibility = hasAuthor ? Visibility.Visible : Visibility.Collapsed;
         RenderProgress();
     }
 
@@ -110,15 +113,54 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
     private void OnAuthorExited(object sender, PointerRoutedEventArgs e) =>
         AuthorText.TextDecorations = Windows.UI.Text.TextDecorations.None;
 
-    private void OnAuthorTapped(object sender, TappedRoutedEventArgs e)
+    private async void OnAuthorTapped(object sender, TappedRoutedEventArgs e)
     {
         e.Handled = true;
-        if (Video is { } video) ChannelClicked?.Invoke(this, video);
+        if (Video is { } video) await ActivateChannelAsync(video);
     }
 
-    private void OnGoToChannel(object sender, RoutedEventArgs e)
+    private async void OnGoToChannel(object sender, RoutedEventArgs e)
     {
-        if (Video is { } video) ChannelClicked?.Invoke(this, video);
+        if (Video is { } video) await ActivateChannelAsync(video);
+    }
+
+    /// True while a lazy channel-id resolve is in flight, so a second activation (double-click,
+    /// or context-menu-then-author-click) doesn't fire a second lookup for the same card.
+    private bool resolvingChannel;
+
+    /// Cards with an inline id raise ChannelClicked immediately, same as always. Cards without
+    /// one (every non-Shorts tile in Home's "Recommended"/topic shelves — see VideoMetadataService
+    /// for why) resolve it lazily through the app's existing cached per-video lookup and raise
+    /// ChannelClicked once resolved, so page-level OnChannelClicked handlers still only ever see
+    /// a real id. Failure (network error or a still-missing id) is silent beyond a log line —
+    /// there's nothing sensible to surface from a context-menu click.
+    private async Task ActivateChannelAsync(VideoItem video)
+    {
+        if (video.ChannelId is not null)
+        {
+            ChannelClicked?.Invoke(this, video);
+            return;
+        }
+        if (resolvingChannel) return;
+        resolvingChannel = true;
+        try
+        {
+            var resolved = await App.Session.Metadata.LoadAsync(video.Id);
+            if (resolved?.ChannelId is { } channelId)
+                ChannelClicked?.Invoke(this, video with { ChannelId = channelId });
+            else
+                WinTube.Core.Sync.WatchProgressSync.LogTo(
+                    WinTube.App.Session.DataDirectory, $"channel resolve failed: {video.Id}");
+        }
+        catch (Exception)
+        {
+            WinTube.Core.Sync.WatchProgressSync.LogTo(
+                WinTube.App.Session.DataDirectory, $"channel resolve failed: {video.Id}");
+        }
+        finally
+        {
+            resolvingChannel = false;
+        }
     }
 
     // MARK: hover/focus preview (IPreviewHost)
