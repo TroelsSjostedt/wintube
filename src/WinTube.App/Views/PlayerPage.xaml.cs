@@ -551,6 +551,7 @@ public sealed partial class PlayerPage : Page
     /// leaves playback exactly as it was and only changes fullscreen.
     private void OnPlayerDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
+        if (MouseBackGuard.SuppressTap()) return;
         if (Player is null) return;
         for (var element = e.OriginalSource as DependencyObject; element is not null;
              element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element))
@@ -998,8 +999,13 @@ public sealed partial class PlayerPage : Page
     /// controls too, and their invisible root layout spans the full frame — so instead
     /// of fencing off the controls as a region, only a tap that actually landed on an
     /// interactive control (a button, a slider) is left alone.
+    ///
+    /// A mouse-back press raises Tapped here too (WinUI: the side buttons raise Tapped but never
+    /// Click) — without the MouseBackGuard check, pressing mouse-back over the player would both
+    /// navigate back and toggle play/pause. See MainWindow's PointerPressed handler.
     private void OnPlayerTapped(object sender, TappedRoutedEventArgs e)
     {
+        if (MouseBackGuard.SuppressTap()) return;
         if (Player is null) return;
         for (var element = e.OriginalSource as DependencyObject; element is not null;
              element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element))
@@ -1129,6 +1135,7 @@ public sealed partial class PlayerPage : Page
 
     private void OnTitleTapped(object sender, TappedRoutedEventArgs e)
     {
+        if (MouseBackGuard.SuppressTap()) return;
         if (!HasDescription) return;
         ToggleDescriptionPanel();
     }

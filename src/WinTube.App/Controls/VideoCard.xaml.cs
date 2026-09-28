@@ -102,13 +102,14 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
         return string.Join(" · ", parts);
     }
 
+    // A mouse-back press raises Tapped here too (WinUI: the side buttons raise Tapped but never
+    // Click), so this — and OnAuthorTapped below — must bow out while MouseBackGuard says the
+    // Tapped is really the tail end of an X-button press, or mouse-back would both navigate back
+    // and open the card underneath it. See MainWindow's PointerPressed handler and MouseBackGuard.
     private void OnTapped(object sender, TappedRoutedEventArgs e)
     {
-        if (Video is not { } video) return;
-        // TEMPORARY (mouse-back instrumentation) — strip in the closing round.
-        WinTube.Core.Sync.WatchProgressSync.LogTo(WinTube.App.Session.DataDirectory,
-            $"backbtn: card Tapped {video.Id} device={e.PointerDeviceType}");
-        Clicked?.Invoke(this, video);
+        if (MouseBackGuard.SuppressTap()) return;
+        if (Video is { } video) Clicked?.Invoke(this, video);
     }
 
     private void OnAuthorEntered(object sender, PointerRoutedEventArgs e) =>
@@ -119,6 +120,7 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
 
     private async void OnAuthorTapped(object sender, TappedRoutedEventArgs e)
     {
+        if (MouseBackGuard.SuppressTap()) return;
         e.Handled = true;
         if (Video is { } video) await ActivateChannelAsync(video);
     }

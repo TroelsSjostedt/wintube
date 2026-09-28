@@ -1,9 +1,7 @@
-using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using WinRT.Interop;
 
 namespace WinTube.App;
 
@@ -31,7 +29,10 @@ public sealed partial class MainWindow : Window
         // The pane's own back arrow is THE back button everywhere; it lights up whenever the
         // frame has somewhere to go back to (player, channel chains, subscriptions drill-ins).
         RootFrame.Navigated += (_, _) => Nav.IsBackEnabled = RootFrame.CanGoBack;
-        SubclassWindowForMouseBackButton();
+        // Mouse back button (XButton1), app-wide: handledEventsToo so it still fires over the
+        // player's own handlers. See OnRootPointerPressed below for why this alone is enough —
+        // no Win32-level interception needed.
+        RootGrid.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnRootPointerPressed), true);
         App.Session.SignedOut += OnSessionSignedOut;
         Activated += OnActivated;
         Closed += OnClosed;
@@ -169,13 +170,6 @@ public sealed partial class MainWindow : Window
     /// device — throttled so switching apps back and forth doesn't hammer the backend.
     private void OnActivated(object sender, WindowActivatedEventArgs e)
     {
-        // First Activated, not the constructor: WinUI 3's own child HWNDs (the content bridge
-        // and its input site — see SubclassInputChildWindowsOnce) don't exist yet when the
-        // constructor runs, only once the window's content has actually been realized.
-        SubclassInputChildWindowsOnce();
-        // TEMPORARY (mouse-back instrumentation): needs the child windows already found above,
-        // since it targets the thread that owns the InputSiteWindowClass one specifically.
-        InstallDiagnosticHooksOnce();
         if (e.WindowActivationState == WindowActivationState.Deactivated) return;
         var now = DateTimeOffset.UtcNow;
         if (now - lastSyncTrigger <= TimeSpan.FromSeconds(60)) return;
@@ -183,12 +177,7 @@ public sealed partial class MainWindow : Window
         App.Session.ProgressSync?.Sync();
     }
 
-    private void OnClosed(object sender, WindowEventArgs e)
-    {
-        App.Session.ProgressSync?.FlushNow();
-        // TEMPORARY (mouse-back instrumentation): hooks installed in InstallDiagnosticHooksOnce.
-        foreach (var hook in installedHooks) UnhookWindowsHookEx(hook);
-    }
+    private void OnClosed(object sender, WindowEventArgs e) => App.Session.ProgressSync?.FlushNow();
 
     /// Session.SignOut() raises this both for the manual sign-out above and for RunAsync
     /// giving up on a permanently failed refresh (which can happen from an async
@@ -209,244 +198,46 @@ public sealed partial class MainWindow : Window
         Nav.SelectedItem = HomeItem;
     }
 
-    // MARK: mouse back button (Win32)
+    // MARK: mouse back button
     //
-    // A PointerPressed handler (even with handledEventsToo) can't stop this: WinUI's gesture
-    // recognizer (Tapped/ItemClick, which is what actually activates a home-page card) is driven
-    // off the platform's own pointer/gesture pipeline, generated independently of the Handled
-    // flag on the routed PointerPressed event — marking it Handled there doesn't stop XAML from
-    // separately recognizing a tap. Win32-level interception has to happen in two places:
-    //  - the input child window WinUI 3 actually delivers pointer input to (SubclassInputChildWindowsOnce
-    //    below) — this is the real fix, since eating it there stops WinUI's own recognizer from
-    //    ever seeing the click;
-    //  - this top-level window's own WndProc (SubclassWindowForMouseBackButton), kept as a
-    //    fallback for WM_APPCOMMAND, which DefWindowProc can still synthesize and bubble up to
-    //    the top level even when the child swallow below handles everything else.
+    // Several approaches were tried and rejected before this one (see the branch's earlier
+    // commits): a routed PointerPressed handler that only marked the event Handled didn't stop
+    // WinUI's own gesture recognizer from separately raising Tapped on whatever was under the
+    // pointer; and a full Win32-level interception — subclassing this window's WndProc, then the
+    // WinUI-internal input child windows (a "Microsoft.UI.Content.DesktopChildSiteBridge"
+    // wrapping an "InputSiteWindowClass"), then WH_GETMESSAGE/WH_CALLWNDPROC hooks on every
+    // relevant thread — never saw a single byte of mouse-button traffic. That confirmed WinUI 3's
+    // lifted input travels the compositor's own channel, not a Win32 message queue any WndProc or
+    // hook could ever intercept, making the entire Win32 approach a dead end.
     //
-    // Two prior rounds swallowed only the legacy WM_XBUTTON* messages and still saw the card
-    // activate. WinUI 3 runs with mouse-in-pointer enabled, so a mouse's side buttons arrive as
-    // WM_POINTERDOWN/WM_POINTERUP with the fourth/fifth-button flag set in HIWORD(wParam)
-    // (IS_POINTER_FOURTHBUTTON_WPARAM/IS_POINTER_FIFTHBUTTON_WPARAM in winuser.h) instead of, or
-    // as well as, WM_XBUTTON* — so both families are now logged and swallowed. The logging below
-    // is TEMPORARY instrumentation (prefix "backbtn:", via WatchProgressSync.LogTo) to nail down
-    // which path actually fires; strip it once the fix is confirmed live.
+    // The actual fix stays entirely in the XAML layer: a routed PointerPressed DOES fire here for
+    // an X-button press (confirmed live), so OnRootPointerPressed below just calls GoBack
+    // directly — no swallowing needed. The remaining wrinkle is that WinUI also raises Tapped for
+    // an X-button press (a known WinUI quirk: the side buttons raise Tapped but never Click), so
+    // without help a mouse-back over a card would both navigate back and activate the card.
+    // MouseBackGuard bridges the two: this handler records the press, and every Tapped-driven
+    // activation handler an X-button press can reach (VideoCard.OnTapped/OnAuthorTapped,
+    // PlayerPage.OnPlayerTapped/OnPlayerDoubleTapped/OnTitleTapped) checks
+    // MouseBackGuard.SuppressTap() first and bows out. Buttons need no such guard — Click already
+    // ignores X-button presses.
 
-    private const int GWLP_WNDPROC = -4;
-    private const uint WM_XBUTTONDOWN = 0x020B;
-    private const uint WM_XBUTTONUP = 0x020C;
-    private const uint WM_XBUTTONDBLCLK = 0x020D;
-    private const uint WM_POINTERDOWN = 0x0246;
-    private const uint WM_POINTERUP = 0x0247;
-    private const uint WM_APPCOMMAND = 0x0319;
-    // Nonclient variants — sent when the click lands outside the client area of whatever HWND
-    // receives it; included in the diagnostic hooks below since that's untested territory here.
-    private const uint WM_NCXBUTTONDOWN = 0x00AB;
-    private const uint WM_NCXBUTTONUP = 0x00AC;
-    private const uint WM_NCXBUTTONDBLCLK = 0x00AD;
-    private const int XBUTTON1 = 1;
-    private const int APPCOMMAND_BROWSER_BACKWARD = 1;
-
-    // winuser.h: POINTER_MESSAGE_FLAG_FOURTHBUTTON/FIFTHBUTTON, tested against HIWORD(wParam) —
-    // this is what IS_POINTER_FOURTHBUTTON_WPARAM/IS_POINTER_FIFTHBUTTON_WPARAM actually expand
-    // to (not a GetPointerInfo call; the flags ride in wParam itself, same word as the pointer
-    // id in the low 16 bits).
-    private const uint POINTER_MESSAGE_FLAG_FOURTHBUTTON = 0x0080;
-    private const uint POINTER_MESSAGE_FLAG_FIFTHBUTTON = 0x0100;
-
-    private delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-    // Kept rooted for the process lifetime: SetWindowLongPtr hands Windows a native function
-    // pointer into this delegate's marshaled thunk, and nothing else holds a managed reference
-    // to it — without this field the GC could collect it and leave the window pointing at freed
-    // memory the next time a message arrives.
-    private WndProc? mouseBackWndProc;
-    private IntPtr originalWndProc;
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
-    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, WndProc newProc);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr CallWindowProc(IntPtr prevWndProc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    private static extern bool EnumChildWindows(IntPtr hWndParent, EnumChildWindowsProc lpEnumFunc, IntPtr lParam);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
-
-    private delegate bool EnumChildWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-    /// TEMPORARY (mouse-back instrumentation) — strip in the closing round. Same sink
-    /// (WatchProgressSync's rootDirectory.sync.log) the rest of the app already logs failures
-    /// to, prefixed so these lines are easy to filter out of one click's worth of output.
-    private static void Log(string message) =>
-        WinTube.Core.Sync.WatchProgressSync.LogTo(Session.DataDirectory, $"backbtn: {message}");
-
-    private static string MsgName(uint msg) => msg switch
+    private void OnRootPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        WM_XBUTTONDOWN => "WM_XBUTTONDOWN",
-        WM_XBUTTONUP => "WM_XBUTTONUP",
-        WM_XBUTTONDBLCLK => "WM_XBUTTONDBLCLK",
-        WM_NCXBUTTONDOWN => "WM_NCXBUTTONDOWN",
-        WM_NCXBUTTONUP => "WM_NCXBUTTONUP",
-        WM_NCXBUTTONDBLCLK => "WM_NCXBUTTONDBLCLK",
-        WM_POINTERDOWN => "WM_POINTERDOWN",
-        WM_POINTERUP => "WM_POINTERUP",
-        WM_APPCOMMAND => "WM_APPCOMMAND",
-        _ => $"0x{msg:X4}",
-    };
-
-    /// HIWORD(wParam) — where both the legacy XBUTTON id and the WM_POINTER* button flags live.
-    private static uint HighWordFlags(IntPtr wParam) => (uint)((wParam.ToInt64() >> 16) & 0xFFFF);
-
-    private void SubclassWindowForMouseBackButton()
-    {
-        var hwnd = WindowNative.GetWindowHandle(this);
-        mouseBackWndProc = MouseBackWndProc;
-        originalWndProc = SetWindowLongPtr(hwnd, GWLP_WNDPROC, mouseBackWndProc);
-        // TEMPORARY instrumentation: a zero return here (rather than the previous proc pointer)
-        // means the subclass never took, which we hadn't actually confirmed before this round.
-        Log($"top-level SetWindowLongPtr returned 0x{originalWndProc.ToInt64():X} (nonzero=success={originalWndProc != IntPtr.Zero})");
+        var properties = e.GetCurrentPoint(null).Properties;
+        if (!properties.IsXButton1Pressed && !properties.IsXButton2Pressed)
+        {
+            MouseBackGuard.RecordOtherButtonPress();
+            return;
+        }
+        MouseBackGuard.RecordXButtonPress();
+        // TEMPORARY: kept for the live confirmation run only — strip once confirmed working.
+        WinTube.Core.Sync.WatchProgressSync.LogTo(Session.DataDirectory,
+            $"backbtn: root press x1={properties.IsXButton1Pressed}");
+        if (properties.IsXButton1Pressed) GoBackDebounced();
     }
 
-    private IntPtr MouseBackWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
-    {
-        if (msg is WM_XBUTTONDOWN or WM_XBUTTONUP or WM_XBUTTONDBLCLK)
-        {
-            Log($"{MsgName(msg)} on top-level"); // TEMPORARY instrumentation
-            // Believed unreachable in practice: pointer input is delivered to WinUI 3's own
-            // child HWNDs (see SubclassInputChildWindowsOnce), never to this top-level one. Left
-            // in and swallowed the same way regardless, as a harmless fallback in case a future
-            // WinUI version ever routes it here directly.
-            var xButton = (int)HighWordFlags(wParam);
-            if (msg == WM_XBUTTONUP && xButton == XBUTTON1) RunOnUiThread(GoBackDebounced);
-            return new IntPtr(1);
-        }
-
-        if (msg is WM_POINTERDOWN or WM_POINTERUP)
-        {
-            var flags = HighWordFlags(wParam);
-            if ((flags & (POINTER_MESSAGE_FLAG_FOURTHBUTTON | POINTER_MESSAGE_FLAG_FIFTHBUTTON)) != 0)
-                // TEMPORARY instrumentation only here — not swallowed at this level. The actual
-                // swallow for mouse-in-pointer input happens in InputChildWndProc below, since
-                // that's the window WinUI's own recognizer actually listens to.
-                Log($"{MsgName(msg)} on top-level flags=0x{flags:X4}");
-        }
-
-        if (msg == WM_APPCOMMAND)
-        {
-            // The other real fallback: DefWindowProc synthesizes this from an unhandled
-            // WM_XBUTTON*, so it only fires if the child-window swallow below doesn't catch the
-            // press first (or for a driver that sends the app command directly). GoBackDebounced
-            // guards against more than one path firing for one physical click.
-            var command = (int)((lParam.ToInt64() >> 16) & 0xFFF);
-            if (command == APPCOMMAND_BROWSER_BACKWARD)
-            {
-                Log("WM_APPCOMMAND APPCOMMAND_BROWSER_BACKWARD on top-level"); // TEMPORARY
-                RunOnUiThread(GoBackDebounced);
-                return new IntPtr(1);
-            }
-        }
-
-        return CallWindowProc(originalWndProc, hWnd, msg, wParam, lParam);
-    }
-
-    private const string BridgeClassName = "Microsoft.UI.Content.DesktopChildSiteBridge";
-    private const string InputSiteClassName = "InputSiteWindowClass";
-
-    // One rooted delegate + original proc per subclassed input-child HWND (same GC-lifetime
-    // reasoning as mouseBackWndProc above). ClassName is carried along purely for the TEMPORARY
-    // logging below.
-    private readonly Dictionary<IntPtr, (WndProc Proc, IntPtr Original, string ClassName)> subclassedInputWindows = new();
-    private bool inputChildWindowsSubclassed;
-
-    /// WinUI 3 hosts its content in child HWNDs of its own — a "Microsoft.UI.Content.
-    /// DesktopChildSiteBridge" wrapping an inner "InputSiteWindowClass" — and pointer input is
-    /// delivered directly to those, never to the top-level window subclassed above (only the
-    /// WM_APPCOMMAND DefWindowProc synthesizes from an unhandled one bubbles up that far). So
-    /// the actual swallow has to happen down there. Which of the two class names is the one that
-    /// actually receives the message isn't documented, so — per the coordinator's "if in doubt,
-    /// subclass both" — every match of either gets subclassed. EnumChildWindows already walks
-    /// the full descendant tree, not just direct children, so one call from the main HWND finds
-    /// both levels.
-    private void SubclassInputChildWindowsOnce()
-    {
-        if (inputChildWindowsSubclassed) return;
-        inputChildWindowsSubclassed = true;
-
-        var mainHwnd = WindowNative.GetWindowHandle(this);
-        var matches = new List<(IntPtr Hwnd, string ClassName)>();
-        var classNameBuffer = new System.Text.StringBuilder(256);
-        EnumChildWindows(mainHwnd, (hWnd, _) =>
-        {
-            classNameBuffer.Clear();
-            GetClassName(hWnd, classNameBuffer, classNameBuffer.Capacity);
-            var className = classNameBuffer.ToString();
-            if (className is BridgeClassName or InputSiteClassName) matches.Add((hWnd, className));
-            return true; // keep enumerating — there can be more than one match (multiple pages/popups).
-        }, IntPtr.Zero);
-
-        // TEMPORARY instrumentation: confirms subclassing actually found something before a
-        // click even happens — a zero count means timing beat it (content not realized yet at
-        // first Activated) rather than the class names being wrong.
-        Log(matches.Count == 0
-            ? "found 0 candidate child windows — timing may have beaten subclassing"
-            : $"found {matches.Count} candidate child window(s): {string.Join(", ", matches.Select(m => m.ClassName))}");
-
-        foreach (var (hWnd, className) in matches)
-        {
-            WndProc proc = InputChildWndProc;
-            var original = SetWindowLongPtr(hWnd, GWLP_WNDPROC, proc);
-            // TEMPORARY instrumentation: confirms each subclass actually took (nonzero original
-            // proc), same reasoning as the top-level one in SubclassWindowForMouseBackButton.
-            Log($"subclassed {className} hwnd={hWnd}: SetWindowLongPtr returned 0x{original.ToInt64():X} (nonzero=success={original != IntPtr.Zero})");
-            subclassedInputWindows[hWnd] = (proc, original, className);
-        }
-    }
-
-    private IntPtr InputChildWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
-    {
-        var className = subclassedInputWindows.TryGetValue(hWnd, out var info) ? info.ClassName : "?";
-
-        if (msg is WM_XBUTTONDOWN or WM_XBUTTONUP or WM_XBUTTONDBLCLK)
-        {
-            Log($"{MsgName(msg)} on {className}"); // TEMPORARY instrumentation
-            // Swallowed unconditionally for both buttons, all three variants — returning without
-            // forwarding to the original proc keeps WinUI's gesture recognizer from ever seeing
-            // the click, so a card under the pointer can't activate. XBUTTON1 navigates on the
-            // up-click; XBUTTON2 is swallowed too but never navigates.
-            var xButton = (int)HighWordFlags(wParam);
-            if (msg == WM_XBUTTONUP && xButton == XBUTTON1) RunOnUiThread(GoBackDebounced);
-            return new IntPtr(1);
-        }
-
-        if (msg is WM_POINTERDOWN or WM_POINTERUP)
-        {
-            var flags = HighWordFlags(wParam);
-            if ((flags & (POINTER_MESSAGE_FLAG_FOURTHBUTTON | POINTER_MESSAGE_FLAG_FIFTHBUTTON)) != 0)
-            {
-                Log($"{MsgName(msg)} on {className} flags=0x{flags:X4}"); // TEMPORARY instrumentation
-                // Real fix attempt: WinUI 3 runs with mouse-in-pointer enabled, so a mouse's side
-                // buttons arrive here rather than as legacy WM_XBUTTON*, which the swallow above
-                // never actually sees for a pointer-input mouse. Returning 0 without forwarding
-                // to the original proc marks a WM_POINTER* message handled, the same way
-                // returning nonzero does for WM_XBUTTON* above — either way the message stops
-                // here instead of reaching WinUI's own recognizer.
-                if (msg == WM_POINTERUP && (flags & POINTER_MESSAGE_FLAG_FOURTHBUTTON) != 0)
-                    RunOnUiThread(GoBackDebounced);
-                return IntPtr.Zero;
-            }
-        }
-
-        var original = subclassedInputWindows[hWnd].Original;
-        return CallWindowProc(original, hWnd, msg, wParam, lParam);
-    }
-
-    /// Debounced rather than a plain GoBackIfPossible: swallowing the press in the input child
-    /// window should stop DefWindowProc from ever synthesizing the WM_APPCOMMAND the top-level
-    /// fallback reacts to, for one physical click — but that internal chain isn't documented,
-    /// and there are now three trigger sites (child XBUTTON, child POINTER, top-level
-    /// APPCOMMAND), so this guards against more than one firing for the same press.
+    /// Only one trigger site now, but kept debounced defensively — a single physical click can
+    /// still generate more than one PointerPressed in edge cases (e.g. a driver that double-posts).
     private DateTime lastMouseBackAt = DateTime.MinValue;
 
     private void GoBackDebounced()
@@ -454,156 +245,6 @@ public sealed partial class MainWindow : Window
         var now = DateTime.UtcNow;
         if (now - lastMouseBackAt < TimeSpan.FromMilliseconds(300)) return;
         lastMouseBackAt = now;
-        Log($"GoBack (CanGoBack={RootFrame.CanGoBack})"); // TEMPORARY instrumentation
         if (RootFrame.CanGoBack) RootFrame.GoBack();
-    }
-
-    /// WndProc for the top-level window runs on the UI thread; the input child window's may run
-    /// on an input thread instead, so this dispatch is required there and merely defensive here
-    /// — either way it's safe to route every mouse-back trigger through the same helper.
-    private void RunOnUiThread(Action action)
-    {
-        if (dispatcher.HasThreadAccess) action();
-        else dispatcher.TryEnqueue(() => action());
-    }
-
-    // MARK: thread-level diagnostic hooks (TEMPORARY — strip in the closing round)
-    //
-    // Prior rounds logged nothing at all for a real MX Master 3S back-button press (a mouse that
-    // demonstrably emits standard XBUTTON1 elsewhere, e.g. File Explorer) while VideoCard.Tapped
-    // still fired — meaning the message isn't reaching either subclassed WndProc above at all.
-    // Two explanations: it's delivered to some HWND we didn't find/subclass, or to a different
-    // thread's queue than the one that HWND's WndProc actually runs on. WH_GETMESSAGE only sees
-    // messages posted to a thread's queue; WH_CALLWNDPROC also sees ones sent directly to a
-    // window procedure — installing both, on both the UI thread and whichever thread owns the
-    // InputSiteWindowClass window, catches a message regardless of which HWND it targets.
-
-    private const int WH_GETMESSAGE = 3;
-    private const int WH_CALLWNDPROC = 4;
-    private const int HC_ACTION = 0;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT { public int X; public int Y; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MSG
-    {
-        public IntPtr Hwnd;
-        public uint Message;
-        public IntPtr WParam;
-        public IntPtr LParam;
-        public uint Time;
-        public POINT Pt;
-    }
-
-    // Field order matters — matches CWPSTRUCT exactly (lParam, wParam, message, hwnd), not the
-    // more natural hwnd-first order.
-    [StructLayout(LayoutKind.Sequential)]
-    private struct CWPSTRUCT
-    {
-        public IntPtr LParam;
-        public IntPtr WParam;
-        public uint Message;
-        public IntPtr Hwnd;
-    }
-
-    private delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr SetWindowsHookExW(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
-
-    [DllImport("user32.dll")]
-    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-
-    [DllImport("kernel32.dll")]
-    private static extern uint GetCurrentThreadId();
-
-    // Every message family worth seeing at the thread level, regardless of target HWND —
-    // deliberately wider than the WndProc swallows above: ALL WM_POINTERDOWN/UP are logged here
-    // (not only ones with the fourth/fifth-button flag set), since the flag constants themselves
-    // are one of the things being verified this round.
-    private static readonly HashSet<uint> DiagnosticMessages = new()
-    {
-        WM_XBUTTONDOWN, WM_XBUTTONUP, WM_XBUTTONDBLCLK,
-        WM_NCXBUTTONDOWN, WM_NCXBUTTONUP, WM_NCXBUTTONDBLCLK,
-        WM_POINTERDOWN, WM_POINTERUP,
-        WM_APPCOMMAND,
-    };
-
-    // Kept rooted for the process lifetime, same GC reasoning as the WndProc delegates above.
-    private HookProc? getMessageHookProc;
-    private HookProc? callWndProcHookProc;
-    private readonly List<IntPtr> installedHooks = new();
-
-    /// Installs WH_GETMESSAGE (posted messages) and WH_CALLWNDPROC (sent messages) on the UI
-    /// thread and, if it's a different thread, on whichever thread owns the InputSiteWindowClass
-    /// window found by SubclassInputChildWindowsOnce (must run first — this reads its results).
-    private void InstallDiagnosticHooksOnce()
-    {
-        if (getMessageHookProc is not null) return;
-        getMessageHookProc = GetMessageHookProc;
-        callWndProcHookProc = CallWndProcHookProc;
-
-        var uiThreadId = GetCurrentThreadId();
-        var inputSiteHwnd = subclassedInputWindows
-            .Where(kv => kv.Value.ClassName == InputSiteClassName)
-            .Select(kv => kv.Key)
-            .DefaultIfEmpty(IntPtr.Zero)
-            .First();
-        var inputSiteThreadId = inputSiteHwnd != IntPtr.Zero
-            ? GetWindowThreadProcessId(inputSiteHwnd, out _)
-            : 0u;
-
-        Log($"UI thread={uiThreadId}, InputSiteWindowClass thread={inputSiteThreadId}" +
-            (inputSiteHwnd == IntPtr.Zero ? " (no InputSiteWindowClass hwnd found)" : "") +
-            $", same thread={uiThreadId == inputSiteThreadId}");
-
-        InstallHookPairForThread(uiThreadId, "ui-thread");
-        if (inputSiteThreadId != 0 && inputSiteThreadId != uiThreadId)
-            InstallHookPairForThread(inputSiteThreadId, "inputsite-thread");
-    }
-
-    private void InstallHookPairForThread(uint threadId, string label)
-    {
-        var getMsgHook = SetWindowsHookExW(WH_GETMESSAGE, getMessageHookProc!, IntPtr.Zero, threadId);
-        var callWndHook = SetWindowsHookExW(WH_CALLWNDPROC, callWndProcHookProc!, IntPtr.Zero, threadId);
-        Log($"hooks on {label} (thread {threadId}): WH_GETMESSAGE={(getMsgHook != IntPtr.Zero ? "ok" : "FAILED")}, " +
-            $"WH_CALLWNDPROC={(callWndHook != IntPtr.Zero ? "ok" : "FAILED")}");
-        if (getMsgHook != IntPtr.Zero) installedHooks.Add(getMsgHook);
-        if (callWndHook != IntPtr.Zero) installedHooks.Add(callWndHook);
-    }
-
-    private IntPtr GetMessageHookProc(int code, IntPtr wParam, IntPtr lParam)
-    {
-        if (code == HC_ACTION)
-        {
-            var msg = Marshal.PtrToStructure<MSG>(lParam);
-            LogDiagnosticMessage("GETMESSAGE", msg.Hwnd, msg.Message, msg.WParam);
-        }
-        return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
-    }
-
-    private IntPtr CallWndProcHookProc(int code, IntPtr wParam, IntPtr lParam)
-    {
-        if (code == HC_ACTION)
-        {
-            var cwp = Marshal.PtrToStructure<CWPSTRUCT>(lParam);
-            LogDiagnosticMessage("CALLWNDPROC", cwp.Hwnd, cwp.Message, cwp.WParam);
-        }
-        return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
-    }
-
-    private void LogDiagnosticMessage(string source, IntPtr hwnd, uint msg, IntPtr wParam)
-    {
-        if (!DiagnosticMessages.Contains(msg)) return;
-        var classNameBuffer = new System.Text.StringBuilder(256);
-        GetClassName(hwnd, classNameBuffer, classNameBuffer.Capacity);
-        Log($"[{source}] {MsgName(msg)} hwnd={hwnd} class={classNameBuffer} wParamHi=0x{HighWordFlags(wParam):X4}");
     }
 }

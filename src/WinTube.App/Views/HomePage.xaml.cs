@@ -173,13 +173,8 @@ public sealed partial class HomePage : Page
 
     // MARK: card interaction
 
-    private void OnVideoCardClicked(object sender, VideoItem video)
-    {
-        // TEMPORARY (mouse-back instrumentation) — strip in the closing round.
-        WinTube.Core.Sync.WatchProgressSync.LogTo(WinTube.App.Session.DataDirectory,
-            $"backbtn: HomePage.OnVideoCardClicked -> navigating to PlayerPage {video.Id}");
+    private void OnVideoCardClicked(object sender, VideoItem video) =>
         Frame.Navigate(typeof(PlayerPage), new PlayerRequest(video));
-    }
 
     private void OnChannelClicked(object sender, VideoItem video)
     {
