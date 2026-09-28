@@ -104,7 +104,11 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
 
     private void OnTapped(object sender, TappedRoutedEventArgs e)
     {
-        if (Video is { } video) Clicked?.Invoke(this, video);
+        if (Video is not { } video) return;
+        // TEMPORARY (mouse-back instrumentation) — strip in the closing round.
+        WinTube.Core.Sync.WatchProgressSync.LogTo(WinTube.App.Session.DataDirectory,
+            $"backbtn: card Tapped {video.Id} device={e.PointerDeviceType}");
+        Clicked?.Invoke(this, video);
     }
 
     private void OnAuthorEntered(object sender, PointerRoutedEventArgs e) =>
