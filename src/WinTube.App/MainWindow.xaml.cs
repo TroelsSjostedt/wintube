@@ -233,9 +233,6 @@ public sealed partial class MainWindow : Window
             return;
         }
         MouseBackGuard.RecordXButtonPress();
-        // TEMPORARY: kept for the live confirmation run only — strip once confirmed working.
-        WinTube.Core.Sync.WatchProgressSync.LogTo(Session.DataDirectory,
-            $"backbtn: root press x1={properties.IsXButton1Pressed}");
         if (properties.IsXButton1Pressed) GoBackDebounced();
     }
 
