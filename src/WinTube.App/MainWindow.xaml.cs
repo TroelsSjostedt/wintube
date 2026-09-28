@@ -1,7 +1,9 @@
+using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using WinRT.Interop;
 
 namespace WinTube.App;
 
@@ -29,11 +31,7 @@ public sealed partial class MainWindow : Window
         // The pane's own back arrow is THE back button everywhere; it lights up whenever the
         // frame has somewhere to go back to (player, channel chains, subscriptions drill-ins).
         RootFrame.Navigated += (_, _) => Nav.IsBackEnabled = RootFrame.CanGoBack;
-        // Mouse back button (XButton1), app-wide: handledEventsToo so it still fires over the
-        // player's own handlers (Tapped/DoubleTapped on PlayerSlot, not PointerPressed, don't
-        // mark it handled anyway). MpvPlayerHost renders into a child SwapChainPanel rather than
-        // a separate HWND, so pointer input stays in the XAML tree and bubbles here normally.
-        RootGrid.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnBackPointerPressed), true);
+        SubclassWindowForMouseBackButton();
         App.Session.SignedOut += OnSessionSignedOut;
         Activated += OnActivated;
         Closed += OnClosed;
@@ -165,18 +163,6 @@ public sealed partial class MainWindow : Window
         if (RootFrame.CanGoBack) RootFrame.GoBack();
     }
 
-    private void OnBackPointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        var props = e.GetCurrentPoint(RootGrid).Properties;
-        if (!props.IsXButton1Pressed && !props.IsXButton2Pressed) return;
-        // Swallow both side buttons unconditionally, even with nowhere to go back to —
-        // otherwise an unhandled press on Home (CanGoBack false) falls through to whatever's
-        // underneath and activates a card. XButton2 (forward) is swallowed too so it can't
-        // activate a card either, but it never navigates — there's no forward stack to go to.
-        e.Handled = true;
-        if (props.IsXButton1Pressed && RootFrame.CanGoBack) RootFrame.GoBack();
-    }
-
     private void OnSignOut(object sender, RoutedEventArgs e) => App.Session.SignOut();
 
     /// Coming back into focus is a good moment to pull in anything synced from another
@@ -209,5 +195,88 @@ public sealed partial class MainWindow : Window
         RootFrame.BackStack.Clear();
         Nav.IsBackEnabled = false;
         Nav.SelectedItem = HomeItem;
+    }
+
+    // MARK: mouse back button (Win32)
+    //
+    // A PointerPressed handler (even with handledEventsToo) can't stop this: WinUI's gesture
+    // recognizer (Tapped/ItemClick, which is what actually activates a home-page card) is driven
+    // off the platform's own pointer/gesture pipeline, generated independently of the Handled
+    // flag on the routed PointerPressed event — marking it Handled there doesn't stop XAML from
+    // separately recognizing a tap. So instead this subclasses the window's WndProc and eats the
+    // side-button messages at the Win32 level, before Windows ever turns them into pointer input
+    // XAML can see.
+
+    private const int GWLP_WNDPROC = -4;
+    private const uint WM_XBUTTONDOWN = 0x020B;
+    private const uint WM_XBUTTONUP = 0x020C;
+    private const uint WM_XBUTTONDBLCLK = 0x020D;
+    private const uint WM_APPCOMMAND = 0x0319;
+    private const int XBUTTON1 = 1;
+    private const int APPCOMMAND_BROWSER_BACKWARD = 1;
+
+    private delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    // Kept rooted for the process lifetime: SetWindowLongPtr hands Windows a native function
+    // pointer into this delegate's marshaled thunk, and nothing else holds a managed reference
+    // to it — without this field the GC could collect it and leave the window pointing at freed
+    // memory the next time a message arrives.
+    private WndProc? mouseBackWndProc;
+    private IntPtr originalWndProc;
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, WndProc newProc);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallWindowProc(IntPtr prevWndProc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    private void SubclassWindowForMouseBackButton()
+    {
+        var hwnd = WindowNative.GetWindowHandle(this);
+        mouseBackWndProc = MouseBackWndProc;
+        originalWndProc = SetWindowLongPtr(hwnd, GWLP_WNDPROC, mouseBackWndProc);
+    }
+
+    private IntPtr MouseBackWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        switch (msg)
+        {
+            // Both buttons, all three variants (down/up/dblclk) are swallowed unconditionally —
+            // returning without calling the original proc stops DefWindowProc from ever
+            // synthesizing a WM_APPCOMMAND out of the press, and since XAML's input pipeline sits
+            // downstream of that same proc chain, it never sees the click at all. XBUTTON1 (back)
+            // navigates on the up-click, matching a normal button press; XBUTTON2 (forward) is
+            // swallowed too (so it can't fall through to a card either) but never navigates.
+            case WM_XBUTTONDOWN or WM_XBUTTONUP or WM_XBUTTONDBLCLK:
+                var xButton = (int)((wParam.ToInt64() >> 16) & 0xFFFF);
+                if (msg == WM_XBUTTONUP && xButton == XBUTTON1) RunOnUiThread(GoBackIfPossible);
+                return new IntPtr(1);
+
+            // Some mice/drivers send the browser-back app command directly instead of (or as
+            // well as) WM_XBUTTON*; handled the same way for keyboards with dedicated back keys.
+            case WM_APPCOMMAND:
+                var command = (int)((lParam.ToInt64() >> 16) & 0xFFF);
+                if (command == APPCOMMAND_BROWSER_BACKWARD)
+                {
+                    RunOnUiThread(GoBackIfPossible);
+                    return new IntPtr(1);
+                }
+                break;
+        }
+        return CallWindowProc(originalWndProc, hWnd, msg, wParam, lParam);
+    }
+
+    private void GoBackIfPossible()
+    {
+        if (RootFrame.CanGoBack) RootFrame.GoBack();
+    }
+
+    /// WndProc runs on the UI thread for this window, so HasThreadAccess is always true in
+    /// practice — the dispatch is defensive, matching the same safe pattern OnSessionSignedOut
+    /// uses below for a callback that genuinely can arrive off-thread.
+    private void RunOnUiThread(Action action)
+    {
+        if (dispatcher.HasThreadAccess) action();
+        else dispatcher.TryEnqueue(() => action());
     }
 }
