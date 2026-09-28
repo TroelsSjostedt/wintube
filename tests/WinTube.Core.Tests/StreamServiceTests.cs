@@ -10,6 +10,7 @@ public class StreamServiceTests
 
     private const string HlsResponse = """
         {"playabilityStatus":{"status":"OK"},
+         "videoDetails":{"shortDescription":"Timestamps: 0:30 intro. See https://example.com for more."},
          "streamingData":{
            "hlsManifestUrl":"https://manifest.example/master.m3u8",
            "adaptiveFormats":[
@@ -55,6 +56,16 @@ public class StreamServiceTests
         Assert.True(stream.IsAdaptive);
         Assert.Equal(ClientKind.VisionOs, stream.Client);
         Assert.Equal("de-DE", stream.OriginalAudioLanguage);
+        Assert.Equal("Timestamps: 0:30 intro. See https://example.com for more.", stream.Description);
+    }
+
+    [Fact]
+    public async Task Resolve_NoShortDescription_LeavesDescriptionNull()
+    {
+        var service = Make(
+            host => host == "youtubei.googleapis.com" ? Itag18Response : LoginRequired, out _);
+        var stream = await service.ResolveAsync("abc");
+        Assert.Null(stream.Description);
     }
 
     [Fact]

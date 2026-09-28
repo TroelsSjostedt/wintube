@@ -13,8 +13,15 @@
     <Grid RowDefinitions="Auto,*" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid x:Name="TitleRow" Grid.Row="0" Padding="12,8" ColumnDefinitions="*,Auto">
             <StackPanel Grid.Column="0" Margin="4,0,0,0" VerticalAlignment="Center">
-                <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis"
-                           Style="{StaticResource SubtitleTextBlockStyle}"/>
+                <Grid x:Name="TitleTapArea" ColumnDefinitions="*,Auto" Background="Transparent"
+                      Tapped="OnTitleTapped" PointerEntered="OnTitleEntered" PointerExited="OnTitleExited">
+                    <TextBlock x:Name="TitleText" Grid.Column="0" TextTrimming="CharacterEllipsis"
+                               Style="{StaticResource SubtitleTextBlockStyle}"/>
+                    <!-- Affordance for the description panel — only shown once a non-empty
+                         description has arrived with the resolved stream (SetDescription). -->
+                    <FontIcon x:Name="TitleChevron" Grid.Column="1" Glyph="&#xE70D;" FontSize="12"
+                              Margin="6,2,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
+                </Grid>
                 <TextBlock x:Name="AuthorLink" FontSize="12" Margin="0,2,0,0"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                            TextTrimming="CharacterEllipsis"
@@ -186,6 +193,23 @@
                            Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                 <Button x:Name="CommentsRetry" Grid.Row="1" Content="Retry" VerticalAlignment="Center"
                         HorizontalAlignment="Center" Visibility="Collapsed" Click="OnCommentsRetry"/>
+            </Grid>
+
+            <Grid x:Name="DescriptionPanel" Width="400" HorizontalAlignment="Right"
+                  Visibility="Collapsed" Background="#D9141414" Tapped="OnDescriptionPanelTapped">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Padding="16,12" ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="DESCRIPTION" VerticalAlignment="Center"
+                               CharacterSpacing="60" FontSize="13"/>
+                    <Button Grid.Column="1" Content="&#xE711;"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}" Click="OnToggleDescription"/>
+                </Grid>
+                <ScrollViewer Grid.Row="1" Padding="16,0,16,16">
+                    <RichTextBlock x:Name="DescriptionBody" IsTextSelectionEnabled="True" TextWrapping="Wrap"/>
+                </ScrollViewer>
             </Grid>
         </Grid>
     </Grid>

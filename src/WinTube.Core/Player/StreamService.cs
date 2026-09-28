@@ -7,8 +7,11 @@ namespace WinTube.Core.Player;
 /// UserAgent is the resolving client's, sent on media requests so playback presents as the
 /// same client that minted the URL. OriginalAudioLanguage marks the video's own audio track
 /// for dubbed videos — the HLS manifest declares no default, so the player must select it.
+/// Description is the player response's own videoDetails.shortDescription — present from every
+/// client on the ladder, so it rides along with whichever one ultimately resolves.
 public sealed record ResolvedStream(
-    Uri Url, ClientKind Client, string UserAgent, bool IsAdaptive, string? OriginalAudioLanguage);
+    Uri Url, ClientKind Client, string UserAgent, bool IsAdaptive, string? OriginalAudioLanguage,
+    string? Description = null);
 
 /// The message is user-showable: YouTube's own playability reason when there was one.
 public sealed class StreamException(string message) : Exception(message);
@@ -110,10 +113,12 @@ public sealed class StreamService(InnerTubeClient innerTube, VisitorDataStore vi
     /// MP4 with a plain url. Null means playable-but-nothing-usable (typically SABR-only).
     private static ResolvedStream? Pick(JsonElement json, ClientKind kind, string userAgent)
     {
+        var description = Json.StringAt(json, "videoDetails/shortDescription");
+
         if (Json.StringAt(json, "streamingData/hlsManifestUrl") is { } hls &&
             Uri.TryCreate(hls, UriKind.Absolute, out var hlsUrl))
             return new ResolvedStream(hlsUrl, kind, userAgent, IsAdaptive: true,
-                OriginalAudioLanguage: OriginalAudioLanguage(json));
+                OriginalAudioLanguage: OriginalAudioLanguage(json), Description: description);
 
         var formats = Json.ValueAt(json, "streamingData/formats") is
             { ValueKind: JsonValueKind.Array } arr
@@ -137,7 +142,7 @@ public sealed class StreamService(InnerTubeClient innerTube, VisitorDataStore vi
         return pick is null
             ? null
             : new ResolvedStream(pick, kind, userAgent, IsAdaptive: false,
-                OriginalAudioLanguage: null);
+                OriginalAudioLanguage: null, Description: description);
     }
 
     private static Uri? UsableUrl(JsonElement format) =>

@@ -3,6 +3,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -87,6 +88,14 @@ public sealed partial class PlayerPage : Page
     /// Cached result of GetThumbInset() — set once the live Thumb part has a real ActualWidth.
     private double? thumbInset;
 
+    // MARK: description
+    /// The latest resolved stream's videoDetails.shortDescription — set fresh by every PlayAsync
+    /// (including a ladder retry's), reset to null in OnNavigatedTo. Null/whitespace means no
+    /// description panel is offered at all (TitleChevron stays collapsed, the title isn't
+    /// clickable).
+    private string? description;
+    private bool HasDescription => !string.IsNullOrWhiteSpace(description);
+
     // MARK: comments
     private readonly ObservableCollection<CommentRowViewModel> commentRows = [];
     private List<CommentItem> topLevelComments = [];
@@ -148,6 +157,7 @@ public sealed partial class PlayerPage : Page
         leftPage = false;
         retried = false;
         ClearSponsorMarkers();
+        ResetDescription();
         _ = StartAsync(after: null);
 
         ResetComments();
@@ -285,6 +295,9 @@ public sealed partial class PlayerPage : Page
         hasPlayed = false;
         lastUserAgent = stream.UserAgent;
         lastAudioLanguage = stream.OriginalAudioLanguage;
+        // A ladder retry re-enters PlayAsync with a different ResolvedStream (ANDROID carries
+        // its own videoDetails too) — just take whatever the latest attempt reports.
+        SetDescription(stream.Description);
 
         CreatePlayerHost();
         Player!.Volume = App.Session.PlayerSettings.LoadVolume();
@@ -1039,6 +1052,111 @@ public sealed partial class PlayerPage : Page
         ShowSkipToast("Link copied");
     }
 
+    // MARK: description
+
+    /// A fresh video always starts with no description offered at all — TitleChevron collapsed,
+    /// the panel closed and empty — until this video's own PlayAsync (SetDescription) reports
+    /// what the resolved stream carried.
+    private void ResetDescription()
+    {
+        description = null;
+        TitleChevron.Visibility = Visibility.Collapsed;
+        DescriptionPanel.Visibility = Visibility.Collapsed;
+        DescriptionBody.Blocks.Clear();
+    }
+
+    private void SetDescription(string? text)
+    {
+        description = text;
+        TitleChevron.Visibility = HasDescription ? Visibility.Visible : Visibility.Collapsed;
+        // A ladder retry that lands on a client with no description (or none at all) must not
+        // leave a stale panel open and clickable for content that's no longer there.
+        if (!HasDescription && DescriptionPanel.Visibility == Visibility.Visible)
+            DescriptionPanel.Visibility = Visibility.Collapsed;
+        BuildDescriptionContent();
+    }
+
+    /// Turns the parsed runs into one Paragraph's Inlines — a plain Run for Text, a Hyperlink
+    /// for Timestamp (seeks the live player) and Url (hands off to the shell/browser). Rebuilt
+    /// from scratch on every SetDescription; a video's description is small enough that this is
+    /// far simpler than diffing inline collections.
+    private void BuildDescriptionContent()
+    {
+        var paragraph = new Paragraph();
+        foreach (var run in DescriptionText.Parse(description))
+            paragraph.Inlines.Add(BuildDescriptionInline(run));
+        DescriptionBody.Blocks.Clear();
+        DescriptionBody.Blocks.Add(paragraph);
+    }
+
+    private Inline BuildDescriptionInline(DescriptionRun run)
+    {
+        switch (run.Kind)
+        {
+            case DescriptionRunKind.Timestamp:
+            {
+                var seconds = run.Seconds!.Value;
+                var link = new Hyperlink();
+                link.Inlines.Add(new Run { Text = run.Text });
+                link.Click += (_, _) => Player?.SeekTo(seconds);
+                return link;
+            }
+            case DescriptionRunKind.Url:
+            {
+                var url = run.Url!;
+                var link = new Hyperlink();
+                link.Inlines.Add(new Run { Text = run.Text });
+                link.Click += async (_, _) =>
+                {
+                    if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                        await Windows.System.Launcher.LaunchUriAsync(uri);
+                };
+                return link;
+            }
+            default:
+                return new Run { Text = run.Text };
+        }
+    }
+
+    private void OnTitleEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (!HasDescription) return;
+        TitleText.TextDecorations = Windows.UI.Text.TextDecorations.Underline;
+    }
+
+    private void OnTitleExited(object sender, PointerRoutedEventArgs e) =>
+        TitleText.TextDecorations = Windows.UI.Text.TextDecorations.None;
+
+    private void OnTitleTapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (!HasDescription) return;
+        ToggleDescriptionPanel();
+    }
+
+    private void OnToggleDescription(object sender, RoutedEventArgs e) => ToggleDescriptionPanel();
+
+    /// Mutual exclusion with comments (I1-style): the two panels share the same slot visually,
+    /// so showing one always hides the other first.
+    private void ToggleDescriptionPanel()
+    {
+        if (DescriptionPanel.Visibility == Visibility.Visible)
+        {
+            DescriptionPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (CommentsPanel.Visibility == Visibility.Visible)
+        {
+            CommentsPanel.Visibility = Visibility.Collapsed;
+            SetCommentsChecked(false);
+        }
+        DescriptionPanel.Visibility = Visibility.Visible;
+    }
+
+    /// Mirrors OnCommentsPanelTapped: a tap anywhere inside the panel must never bubble to
+    /// OnPlayerTapped and toggle playback.
+    private void OnDescriptionPanelTapped(object sender, TappedRoutedEventArgs e) => e.Handled = true;
+
     // MARK: comments
     //
     // Unauthenticated reads (no Bearer, no 401-retry) — called directly on App.Session.Comments
@@ -1079,6 +1197,8 @@ public sealed partial class PlayerPage : Page
             return;
         }
 
+        // Mutual exclusion with the description panel (I1-style): the two share the same slot.
+        DescriptionPanel.Visibility = Visibility.Collapsed;
         CommentsPanel.Visibility = Visibility.Visible;
         SetCommentsChecked(true);
         if (commentsLoaded) return;
@@ -1278,12 +1398,19 @@ public sealed partial class PlayerPage : Page
     /// is the default Disabled) — so double-registration isn't reachable; nothing here adds or
     /// removes accelerators at runtime. There's no TextBox on this page to yield focus to either.
 
-    /// Esc walks the panel back one level at a time: out of a replies view first, then closes
-    /// the panel entirely — matching tvOS.
+    /// Esc closes the description panel first if it's open, else walks the comments panel back
+    /// one level at a time: out of a replies view first, then closes the panel entirely —
+    /// matching tvOS.
     private void OnEscapeAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
         Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
+        if (DescriptionPanel.Visibility == Visibility.Visible)
+        {
+            DescriptionPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
         if (CommentsPanel.Visibility == Visibility.Visible)
         {
             if (repliesParent is not null) CloseReplies();
