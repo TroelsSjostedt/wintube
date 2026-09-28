@@ -173,6 +173,9 @@ public sealed partial class MainWindow : Window
         // and its input site — see SubclassInputChildWindowsOnce) don't exist yet when the
         // constructor runs, only once the window's content has actually been realized.
         SubclassInputChildWindowsOnce();
+        // TEMPORARY (mouse-back instrumentation): needs the child windows already found above,
+        // since it targets the thread that owns the InputSiteWindowClass one specifically.
+        InstallDiagnosticHooksOnce();
         if (e.WindowActivationState == WindowActivationState.Deactivated) return;
         var now = DateTimeOffset.UtcNow;
         if (now - lastSyncTrigger <= TimeSpan.FromSeconds(60)) return;
@@ -180,7 +183,12 @@ public sealed partial class MainWindow : Window
         App.Session.ProgressSync?.Sync();
     }
 
-    private void OnClosed(object sender, WindowEventArgs e) => App.Session.ProgressSync?.FlushNow();
+    private void OnClosed(object sender, WindowEventArgs e)
+    {
+        App.Session.ProgressSync?.FlushNow();
+        // TEMPORARY (mouse-back instrumentation): hooks installed in InstallDiagnosticHooksOnce.
+        foreach (var hook in installedHooks) UnhookWindowsHookEx(hook);
+    }
 
     /// Session.SignOut() raises this both for the manual sign-out above and for RunAsync
     /// giving up on a permanently failed refresh (which can happen from an async
@@ -230,6 +238,11 @@ public sealed partial class MainWindow : Window
     private const uint WM_POINTERDOWN = 0x0246;
     private const uint WM_POINTERUP = 0x0247;
     private const uint WM_APPCOMMAND = 0x0319;
+    // Nonclient variants — sent when the click lands outside the client area of whatever HWND
+    // receives it; included in the diagnostic hooks below since that's untested territory here.
+    private const uint WM_NCXBUTTONDOWN = 0x00AB;
+    private const uint WM_NCXBUTTONUP = 0x00AC;
+    private const uint WM_NCXBUTTONDBLCLK = 0x00AD;
     private const int XBUTTON1 = 1;
     private const int APPCOMMAND_BROWSER_BACKWARD = 1;
 
@@ -274,6 +287,9 @@ public sealed partial class MainWindow : Window
         WM_XBUTTONDOWN => "WM_XBUTTONDOWN",
         WM_XBUTTONUP => "WM_XBUTTONUP",
         WM_XBUTTONDBLCLK => "WM_XBUTTONDBLCLK",
+        WM_NCXBUTTONDOWN => "WM_NCXBUTTONDOWN",
+        WM_NCXBUTTONUP => "WM_NCXBUTTONUP",
+        WM_NCXBUTTONDBLCLK => "WM_NCXBUTTONDBLCLK",
         WM_POINTERDOWN => "WM_POINTERDOWN",
         WM_POINTERUP => "WM_POINTERUP",
         WM_APPCOMMAND => "WM_APPCOMMAND",
@@ -288,6 +304,9 @@ public sealed partial class MainWindow : Window
         var hwnd = WindowNative.GetWindowHandle(this);
         mouseBackWndProc = MouseBackWndProc;
         originalWndProc = SetWindowLongPtr(hwnd, GWLP_WNDPROC, mouseBackWndProc);
+        // TEMPORARY instrumentation: a zero return here (rather than the previous proc pointer)
+        // means the subclass never took, which we hadn't actually confirmed before this round.
+        Log($"top-level SetWindowLongPtr returned 0x{originalWndProc.ToInt64():X} (nonzero=success={originalWndProc != IntPtr.Zero})");
     }
 
     private IntPtr MouseBackWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
@@ -378,6 +397,9 @@ public sealed partial class MainWindow : Window
         {
             WndProc proc = InputChildWndProc;
             var original = SetWindowLongPtr(hWnd, GWLP_WNDPROC, proc);
+            // TEMPORARY instrumentation: confirms each subclass actually took (nonzero original
+            // proc), same reasoning as the top-level one in SubclassWindowForMouseBackButton.
+            Log($"subclassed {className} hwnd={hWnd}: SetWindowLongPtr returned 0x{original.ToInt64():X} (nonzero=success={original != IntPtr.Zero})");
             subclassedInputWindows[hWnd] = (proc, original, className);
         }
     }
@@ -443,5 +465,145 @@ public sealed partial class MainWindow : Window
     {
         if (dispatcher.HasThreadAccess) action();
         else dispatcher.TryEnqueue(() => action());
+    }
+
+    // MARK: thread-level diagnostic hooks (TEMPORARY — strip in the closing round)
+    //
+    // Prior rounds logged nothing at all for a real MX Master 3S back-button press (a mouse that
+    // demonstrably emits standard XBUTTON1 elsewhere, e.g. File Explorer) while VideoCard.Tapped
+    // still fired — meaning the message isn't reaching either subclassed WndProc above at all.
+    // Two explanations: it's delivered to some HWND we didn't find/subclass, or to a different
+    // thread's queue than the one that HWND's WndProc actually runs on. WH_GETMESSAGE only sees
+    // messages posted to a thread's queue; WH_CALLWNDPROC also sees ones sent directly to a
+    // window procedure — installing both, on both the UI thread and whichever thread owns the
+    // InputSiteWindowClass window, catches a message regardless of which HWND it targets.
+
+    private const int WH_GETMESSAGE = 3;
+    private const int WH_CALLWNDPROC = 4;
+    private const int HC_ACTION = 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG
+    {
+        public IntPtr Hwnd;
+        public uint Message;
+        public IntPtr WParam;
+        public IntPtr LParam;
+        public uint Time;
+        public POINT Pt;
+    }
+
+    // Field order matters — matches CWPSTRUCT exactly (lParam, wParam, message, hwnd), not the
+    // more natural hwnd-first order.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CWPSTRUCT
+    {
+        public IntPtr LParam;
+        public IntPtr WParam;
+        public uint Message;
+        public IntPtr Hwnd;
+    }
+
+    private delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetWindowsHookExW(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    // Every message family worth seeing at the thread level, regardless of target HWND —
+    // deliberately wider than the WndProc swallows above: ALL WM_POINTERDOWN/UP are logged here
+    // (not only ones with the fourth/fifth-button flag set), since the flag constants themselves
+    // are one of the things being verified this round.
+    private static readonly HashSet<uint> DiagnosticMessages = new()
+    {
+        WM_XBUTTONDOWN, WM_XBUTTONUP, WM_XBUTTONDBLCLK,
+        WM_NCXBUTTONDOWN, WM_NCXBUTTONUP, WM_NCXBUTTONDBLCLK,
+        WM_POINTERDOWN, WM_POINTERUP,
+        WM_APPCOMMAND,
+    };
+
+    // Kept rooted for the process lifetime, same GC reasoning as the WndProc delegates above.
+    private HookProc? getMessageHookProc;
+    private HookProc? callWndProcHookProc;
+    private readonly List<IntPtr> installedHooks = new();
+
+    /// Installs WH_GETMESSAGE (posted messages) and WH_CALLWNDPROC (sent messages) on the UI
+    /// thread and, if it's a different thread, on whichever thread owns the InputSiteWindowClass
+    /// window found by SubclassInputChildWindowsOnce (must run first — this reads its results).
+    private void InstallDiagnosticHooksOnce()
+    {
+        if (getMessageHookProc is not null) return;
+        getMessageHookProc = GetMessageHookProc;
+        callWndProcHookProc = CallWndProcHookProc;
+
+        var uiThreadId = GetCurrentThreadId();
+        var inputSiteHwnd = subclassedInputWindows
+            .Where(kv => kv.Value.ClassName == InputSiteClassName)
+            .Select(kv => kv.Key)
+            .DefaultIfEmpty(IntPtr.Zero)
+            .First();
+        var inputSiteThreadId = inputSiteHwnd != IntPtr.Zero
+            ? GetWindowThreadProcessId(inputSiteHwnd, out _)
+            : 0u;
+
+        Log($"UI thread={uiThreadId}, InputSiteWindowClass thread={inputSiteThreadId}" +
+            (inputSiteHwnd == IntPtr.Zero ? " (no InputSiteWindowClass hwnd found)" : "") +
+            $", same thread={uiThreadId == inputSiteThreadId}");
+
+        InstallHookPairForThread(uiThreadId, "ui-thread");
+        if (inputSiteThreadId != 0 && inputSiteThreadId != uiThreadId)
+            InstallHookPairForThread(inputSiteThreadId, "inputsite-thread");
+    }
+
+    private void InstallHookPairForThread(uint threadId, string label)
+    {
+        var getMsgHook = SetWindowsHookExW(WH_GETMESSAGE, getMessageHookProc!, IntPtr.Zero, threadId);
+        var callWndHook = SetWindowsHookExW(WH_CALLWNDPROC, callWndProcHookProc!, IntPtr.Zero, threadId);
+        Log($"hooks on {label} (thread {threadId}): WH_GETMESSAGE={(getMsgHook != IntPtr.Zero ? "ok" : "FAILED")}, " +
+            $"WH_CALLWNDPROC={(callWndHook != IntPtr.Zero ? "ok" : "FAILED")}");
+        if (getMsgHook != IntPtr.Zero) installedHooks.Add(getMsgHook);
+        if (callWndHook != IntPtr.Zero) installedHooks.Add(callWndHook);
+    }
+
+    private IntPtr GetMessageHookProc(int code, IntPtr wParam, IntPtr lParam)
+    {
+        if (code == HC_ACTION)
+        {
+            var msg = Marshal.PtrToStructure<MSG>(lParam);
+            LogDiagnosticMessage("GETMESSAGE", msg.Hwnd, msg.Message, msg.WParam);
+        }
+        return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+    }
+
+    private IntPtr CallWndProcHookProc(int code, IntPtr wParam, IntPtr lParam)
+    {
+        if (code == HC_ACTION)
+        {
+            var cwp = Marshal.PtrToStructure<CWPSTRUCT>(lParam);
+            LogDiagnosticMessage("CALLWNDPROC", cwp.Hwnd, cwp.Message, cwp.WParam);
+        }
+        return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+    }
+
+    private void LogDiagnosticMessage(string source, IntPtr hwnd, uint msg, IntPtr wParam)
+    {
+        if (!DiagnosticMessages.Contains(msg)) return;
+        var classNameBuffer = new System.Text.StringBuilder(256);
+        GetClassName(hwnd, classNameBuffer, classNameBuffer.Capacity);
+        Log($"[{source}] {MsgName(msg)} hwnd={hwnd} class={classNameBuffer} wParamHi=0x{HighWordFlags(wParam):X4}");
     }
 }
