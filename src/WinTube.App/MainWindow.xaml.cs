@@ -167,9 +167,14 @@ public sealed partial class MainWindow : Window
 
     private void OnBackPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (!e.GetCurrentPoint(RootGrid).Properties.IsXButton1Pressed) return;
+        var props = e.GetCurrentPoint(RootGrid).Properties;
+        if (!props.IsXButton1Pressed && !props.IsXButton2Pressed) return;
+        // Swallow both side buttons unconditionally, even with nowhere to go back to —
+        // otherwise an unhandled press on Home (CanGoBack false) falls through to whatever's
+        // underneath and activates a card. XButton2 (forward) is swallowed too so it can't
+        // activate a card either, but it never navigates — there's no forward stack to go to.
         e.Handled = true;
-        if (RootFrame.CanGoBack) RootFrame.GoBack();
+        if (props.IsXButton1Pressed && RootFrame.CanGoBack) RootFrame.GoBack();
     }
 
     private void OnSignOut(object sender, RoutedEventArgs e) => App.Session.SignOut();

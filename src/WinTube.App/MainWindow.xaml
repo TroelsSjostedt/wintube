@@ -3,12 +3,13 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="WinTube">
-    <Grid x:Name="RootGrid">
+    <Grid x:Name="RootGrid" KeyboardAcceleratorPlacementMode="Hidden">
         <!-- App-wide back navigation: Alt+Left mirrors the pane's own back arrow. Scoped here
              (the root, always live) rather than on a page, so it fires regardless of where
              focus sits, including inside PlayerPage. Modifiers="Menu" (Alt) never collides with
              PlayerPage's own unmodified Left accelerator (seek -10s), since accelerators match
-             key+modifiers exactly. -->
+             key+modifiers exactly. PlacementMode="Hidden" mirrors PlayerPage's own setting, so no
+             "Alt+←" key-tip pops up over the page content on hover. -->
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="Left" Modifiers="Menu" Invoked="OnBackAccelerator"/>
         </Grid.KeyboardAccelerators>
