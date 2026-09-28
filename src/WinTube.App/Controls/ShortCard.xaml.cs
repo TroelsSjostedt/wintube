@@ -72,6 +72,7 @@ public sealed partial class ShortCard : UserControl, IPreviewHost
 
     private void OnTapped(object sender, TappedRoutedEventArgs e)
     {
+        if (MouseBackGuard.SuppressTap()) return;
         if (Video is { } video) Clicked?.Invoke(this, video);
     }
 

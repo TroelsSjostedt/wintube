@@ -1030,6 +1030,7 @@ public sealed partial class PlayerPage : Page
 
     private void OnAuthorTapped(object sender, TappedRoutedEventArgs e)
     {
+        if (MouseBackGuard.SuppressTap()) return;
         if (video?.ChannelId is not { } channelId) return;
         Frame.Navigate(typeof(ChannelPage), new ChannelRequest(channelId, video.Author));
     }

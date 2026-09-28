@@ -62,8 +62,11 @@ public sealed partial class MainWindow : Window
     private void OnVersionExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e) =>
         VersionLink.TextDecorations = Windows.UI.Text.TextDecorations.None;
 
-    private async void OnVersionTapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e) =>
+    private async void OnVersionTapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (MouseBackGuard.SuppressTap()) return;
         await Windows.System.Launcher.LaunchUriAsync(new Uri(UpdateService.ReleaseUrl(installedVersion)));
+    }
 
     /// Fire-and-forget: a dev run or any failure is a silent no-op (see UpdateService), so
     /// there's nothing to await or report on here.
