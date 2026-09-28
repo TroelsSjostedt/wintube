@@ -1,6 +1,7 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 
 namespace WinTube.App;
 
@@ -28,6 +29,11 @@ public sealed partial class MainWindow : Window
         // The pane's own back arrow is THE back button everywhere; it lights up whenever the
         // frame has somewhere to go back to (player, channel chains, subscriptions drill-ins).
         RootFrame.Navigated += (_, _) => Nav.IsBackEnabled = RootFrame.CanGoBack;
+        // Mouse back button (XButton1), app-wide: handledEventsToo so it still fires over the
+        // player's own handlers (Tapped/DoubleTapped on PlayerSlot, not PointerPressed, don't
+        // mark it handled anyway). MpvPlayerHost renders into a child SwapChainPanel rather than
+        // a separate HWND, so pointer input stays in the XAML tree and bubbles here normally.
+        RootGrid.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnBackPointerPressed), true);
         App.Session.SignedOut += OnSessionSignedOut;
         Activated += OnActivated;
         Closed += OnClosed;
@@ -147,6 +153,22 @@ public sealed partial class MainWindow : Window
 
     private void OnBackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
     {
+        if (RootFrame.CanGoBack) RootFrame.GoBack();
+    }
+
+    /// No forward equivalent — matches the pane's own back arrow, which has none either.
+    private void OnBackAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        // Always handled, even with nowhere to go back to, so Alt+Left never leaks through as
+        // a plain Left and hits PlayerPage's -10s seek accelerator.
+        args.Handled = true;
+        if (RootFrame.CanGoBack) RootFrame.GoBack();
+    }
+
+    private void OnBackPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(RootGrid).Properties.IsXButton1Pressed) return;
+        e.Handled = true;
         if (RootFrame.CanGoBack) RootFrame.GoBack();
     }
 
