@@ -70,6 +70,11 @@ public sealed partial class ShortCard : UserControl, IPreviewHost
         App.Previews.Cold(this);
     }
 
+    // Same reasoning as VideoCard.OnTapped: an X-button press raises Tapped here too (WinUI
+    // quirk — side buttons raise Tapped but never Click), so this must bow out while
+    // MouseBackGuard says the Tapped is really the tail end of a mouse-back press, or mouse-back
+    // over a Shorts tile would both navigate back and open the short. See MainWindow's
+    // PointerPressed handler and MouseBackGuard.
     private void OnTapped(object sender, TappedRoutedEventArgs e)
     {
         if (MouseBackGuard.SuppressTap()) return;

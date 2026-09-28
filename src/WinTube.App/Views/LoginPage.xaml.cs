@@ -17,8 +17,16 @@ public sealed partial class LoginPage : Page
     {
         InitializeComponent();
         Loaded += OnLoaded;
-        // Retry path for a failed request/poll: tapping the error message reruns the flow.
-        Status.Tapped += async (_, _) => await RunAsync();
+        // Retry path for a failed request/poll: tapping the error message reruns the flow. An
+        // X-button press raises Tapped here too (WinUI quirk — side buttons raise Tapped but
+        // never Click), so this bows out while MouseBackGuard says the Tapped is really the tail
+        // end of a mouse-back press, same reasoning as MainWindow's PointerPressed handler and
+        // the other guarded Tapped handlers across the app.
+        Status.Tapped += async (_, _) =>
+        {
+            if (MouseBackGuard.SuppressTap()) return;
+            await RunAsync();
+        };
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e) => await RunAsync();
