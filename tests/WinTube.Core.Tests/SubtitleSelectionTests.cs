@@ -15,6 +15,7 @@ public class SubtitleSelectionTests
         var choice = SubtitleSelection.Choose(tracks, "en");
         Assert.False(choice!.IsTranslation);
         Assert.Equal("en-US", choice.Language);
+        Assert.Equal("https://t?lang=en-US&fmt=vtt", choice.Url);
     }
 
     [Fact]
@@ -24,6 +25,7 @@ public class SubtitleSelectionTests
         var en = SubtitleSelection.Choose(tracks, "en");
         Assert.True(en!.IsTranslation);
         Assert.EndsWith("&tlang=en", en.Url);
+        Assert.Equal("en", en.Language);
         Assert.Null(SubtitleSelection.Choose(tracks, "da"));   // no Danish track, no auto-translate
     }
 
@@ -42,15 +44,17 @@ public class SubtitleSelectionTests
     }
 
     [Fact]
-    public void Choose_PrefsersExactLanguageMatch()
+    public void Choose_PrefersExactLanguageMatch_OverPrefixMatch()
     {
         var tracks = new List<CaptionTrack>
         {
             new("https://t?lang=en-GB", "en-GB", "English (UK)", false),
             new("https://t?lang=en-US", "en-US", "English (US)", false),
+            new("https://t?lang=en", "en", "English", false),
         };
         var choice = SubtitleSelection.Choose(tracks, "en-GB");
         Assert.Equal("en-GB", choice!.Language);
+        Assert.Equal("https://t?lang=en-GB&fmt=vtt", choice.Url);
     }
 
     [Fact]
@@ -85,6 +89,7 @@ public class SubtitleSelectionTests
         };
         var choice = SubtitleSelection.Choose(tracks, "en");
         Assert.Equal("English (auto)", choice!.Label);
+        Assert.Equal("https://t?lang=en&fmt=vtt", choice.Url);
     }
 
     [Fact]
@@ -97,8 +102,22 @@ public class SubtitleSelectionTests
         };
         var choice = SubtitleSelection.Choose(tracks, "en");
         Assert.True(choice!.IsTranslation);
-        Assert.Contains("ja", choice.Url);
-        Assert.EndsWith("&tlang=en", choice.Url);
+        Assert.Equal("https://t?lang=ja&fmt=vtt&tlang=en", choice.Url);
+        Assert.Equal("en", choice.Language);
+    }
+
+    [Fact]
+    public void Choose_TranslationWithAllAutoTracks_UsesFirstTrack()
+    {
+        var tracks = new List<CaptionTrack>
+        {
+            new("https://t?lang=ja-asr", "ja", "Japanese (auto)", true),
+            new("https://t?lang=ko-asr", "ko", "Korean (auto)", true),
+        };
+        var choice = SubtitleSelection.Choose(tracks, "en");
+        Assert.True(choice!.IsTranslation);
+        Assert.Equal("https://t?lang=ja-asr&fmt=vtt&tlang=en", choice.Url);
+        Assert.Equal("en", choice.Language);
     }
 
     [Fact]
@@ -107,6 +126,7 @@ public class SubtitleSelectionTests
         var tracks = new List<CaptionTrack> { new("https://t?lang=ja", "ja", "Japanese", false) };
         var choice = SubtitleSelection.Choose(tracks, "en");
         Assert.Equal("Translate to English", choice!.Label);
+        Assert.Equal("en", choice.Language);
     }
 
     [Fact]
