@@ -44,17 +44,116 @@ public class SubtitleSelectionTests
     }
 
     [Fact]
-    public void Choose_PrefersExactLanguageMatch_OverPrefixMatch()
+    public void Choose_ExactMatchBeatsRegionalVariant_RegardlessOfTrackOrder()
     {
+        // Preference "en": the regional en-GB is listed first, the exact "en" last.
         var tracks = new List<CaptionTrack>
         {
             new("https://t?lang=en-GB", "en-GB", "English (UK)", false),
+            new("https://t?lang=en", "en", "English", false),
+        };
+        var choice = SubtitleSelection.Choose(tracks, "en");
+        Assert.Equal("en", choice!.Language);
+        Assert.Equal("https://t?lang=en&fmt=vtt", choice.Url);
+    }
+
+    [Fact]
+    public void Choose_ExactRegionalMatch_PicksItAmongSiblings()
+    {
+        var tracks = new List<CaptionTrack>
+        {
             new("https://t?lang=en-US", "en-US", "English (US)", false),
+            new("https://t?lang=en-GB", "en-GB", "English (UK)", false),
             new("https://t?lang=en", "en", "English", false),
         };
         var choice = SubtitleSelection.Choose(tracks, "en-GB");
         Assert.Equal("en-GB", choice!.Language);
         Assert.Equal("https://t?lang=en-GB&fmt=vtt", choice.Url);
+    }
+
+    [Fact]
+    public void Choose_ExactBeatsSamePrimarySubtag_RegardlessOfTrackOrder()
+    {
+        var tracks = new List<CaptionTrack>
+        {
+            new("https://t?lang=en", "en", "English", false),
+            new("https://t?lang=en-US", "en-US", "English (US)", false),
+            new("https://t?lang=en-GB", "en-GB", "English (UK)", false),
+        };
+        Assert.Equal("en-GB", SubtitleSelection.Choose(tracks, "en-GB")!.Language);
+    }
+
+    [Fact]
+    public void Choose_RegionalPreference_FallsBackToBareLanguageTrack()
+    {
+        var tracks = new List<CaptionTrack> { new("https://t?lang=en", "en", "English", false) };
+        var choice = SubtitleSelection.Choose(tracks, "en-GB");
+        Assert.False(choice!.IsTranslation);
+        Assert.Equal("en", choice.Language);
+    }
+
+    [Fact]
+    public void Choose_RegionalPreference_FallsBackToSiblingRegion()
+    {
+        var tracks = new List<CaptionTrack> { new("https://t?lang=en-US", "en-US", "English (US)", false) };
+        Assert.Equal("en-US", SubtitleSelection.Choose(tracks, "en-GB")!.Language);
+    }
+
+    [Fact]
+    public void Choose_RegionalPreference_TranslatesWhenNoEnglishTrack()
+    {
+        var tracks = new List<CaptionTrack> { new("https://t?lang=ja", "ja", "Japanese", false) };
+        var choice = SubtitleSelection.Choose(tracks, "en-GB");
+        Assert.True(choice!.IsTranslation);
+        Assert.EndsWith("&tlang=en", choice.Url);
+    }
+
+    [Fact]
+    public void Choose_RegionalPreference_NonEnglish_NeverTranslates()
+    {
+        var tracks = new List<CaptionTrack> { new("https://t?lang=ja", "ja", "Japanese", false) };
+        Assert.Null(SubtitleSelection.Choose(tracks, "pt-BR"));
+    }
+
+    [Fact]
+    public void Choose_RegionalPreference_MatchesBareLanguageAsrTrack()
+    {
+        var tracks = new List<CaptionTrack> { new("https://t?lang=pt&caps=asr", "pt", "Portuguese (auto)", true) };
+        var choice = SubtitleSelection.Choose(tracks, "pt-BR");
+        Assert.Equal("pt", choice!.Language);
+        Assert.False(choice.IsTranslation);
+    }
+
+    [Fact]
+    public void Choose_ManualBeatsAsr_EvenWhenAsrIsTheBetterMatchTier()
+    {
+        // Documented order: manual before ASR, then match tier within each.
+        var tracks = new List<CaptionTrack>
+        {
+            new("https://t?lang=en-US", "en-US", "English (US)", false),
+            new("https://t?lang=en&caps=asr", "en", "English (auto)", true),
+        };
+        Assert.Equal("English (US)", SubtitleSelection.Choose(tracks, "en")!.Label);
+    }
+
+    [Fact]
+    public void Choose_WithinAsr_ExactBeatsRegional()
+    {
+        var tracks = new List<CaptionTrack>
+        {
+            new("https://t?lang=en-US&caps=asr", "en-US", "English US (auto)", true),
+            new("https://t?lang=en&caps=asr", "en", "English (auto)", true),
+        };
+        Assert.Equal("English (auto)", SubtitleSelection.Choose(tracks, "en")!.Label);
+    }
+
+    [Fact]
+    public void Choose_SamePrimarySubtag_DoesNotMatchLongerPrefix()
+    {
+        // "en" must not match "eng" or "enm"; primary subtags compare whole.
+        var tracks = new List<CaptionTrack> { new("https://t?lang=enm", "enm", "Middle English", false) };
+        var choice = SubtitleSelection.Choose(tracks, "en-GB");
+        Assert.True(choice!.IsTranslation);   // no match, so only the translation rung is left
     }
 
     [Fact]

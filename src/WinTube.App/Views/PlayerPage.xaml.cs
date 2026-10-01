@@ -46,13 +46,13 @@ public sealed partial class PlayerPage : Page
     private bool hasPlayed;
     private bool handledFailure;
     private bool leftPage;
-    /// M4: armed whenever ReloadAtCurrentQuality starts a quality-switch stall watchdog, and
-    /// cleared the moment ANY Opened lands (host.Opened fires from a switch the same way it
-    /// does from a fresh load). Kept separate from hasPlayed, which stays true for the rest of
-    /// the video once the first attempt has ever opened and would otherwise never gate a later
-    /// switch's own watchdog.
+    /// M4: armed whenever ReloadKeepingPosition starts a reload stall watchdog (quality, subtitle
+    /// or mute-driven subtitle switch), and cleared the moment ANY Opened lands (host.Opened
+    /// fires from a reload the same way it does from a fresh load). Kept separate from
+    /// hasPlayed, which stays true for the rest of the video once the first attempt has ever
+    /// opened and would otherwise never gate a later reload's own watchdog.
     private bool reloadArmed;
-    /// M5: set by ReloadAtCurrentQuality when the host was paused right before the switch.
+    /// M5: set by ReloadKeepingPosition when the host was paused right before the reload.
     /// DoLoad always issues pause=no, so re-pausing has to wait for the reload's own Opened —
     /// issuing Pause() immediately after Load() would race mpv's command queue against that
     /// same pause=no. Consumed (and cleared) the moment that Opened lands.
@@ -67,9 +67,9 @@ public sealed partial class PlayerPage : Page
     /// rung at or below it on every video until the app closes. Deliberately not persisted.
     private static int? preferredHeight;
     /// Seeded from the resolved resume position before the picker becomes clickable, so a
-    /// quality switch during the loading ring (before the first Opened lands and hasPlayed
-    /// flips true) reloads at the real resume point instead of Player.Position's still-0
-    /// value. Only read by ReloadAtCurrentQuality while !hasPlayed — once real positions are
+    /// reload (quality, subtitle or mute-driven) during the loading ring (before the first
+    /// Opened lands and hasPlayed flips true) reloads at the real resume point instead of
+    /// Player.Position's still-0 value. Only read by ReloadKeepingPosition while !hasPlayed — once real positions are
     /// flowing, Player.Position is authoritative and this goes stale on purpose.
     private double lastKnownPosition;
 
@@ -82,8 +82,8 @@ public sealed partial class PlayerPage : Page
     private IReadOnlyList<CaptionTrack> captionTracks = [];
     private SubtitleChoice? activeSubtitle;
     private SubtitleMode subtitleMode = SubtitleMode.Off;
-    /// The subtitle URL every Player.Load passes (activeSubtitle?.Url) — a quality switch reloads
-    /// the file, and mpv drops external subtitles with it, so it must be re-attached each time.
+    /// The subtitle URL every Player.Load passes (activeSubtitle?.Url) — any reload (quality,
+    /// subtitle or mute) reloads the file, and mpv drops external subtitles with it, so it must be re-attached each time.
     private string? lastSubtitleUrl;
     /// Whether the volume was at zero the last time the mute automation looked. The slider fires
     /// ValueChanged on every notch of a drag; only a change of this flag is a mute edge, so
@@ -243,7 +243,7 @@ public sealed partial class PlayerPage : Page
         pauseAfterReload = false;
 
         // Resolved and seeded into lastKnownPosition before BuildQualityMenu can make the picker
-        // clickable below — a quality switch during the loading ring, before this attempt's own
+        // clickable below — a reload (quality, subtitle or mute) during the loading ring, before this attempt's own
         // Opened has landed, must reload at the real resume point, not 0. startAt is NOT cleared
         // here — a ladder retry re-enters PlayAsync before the video has ever played, and must
         // still resume at the original link timestamp, not recorded progress. It's cleared once,
@@ -430,8 +430,9 @@ public sealed partial class PlayerPage : Page
             // directly rather than waiting on the first "pause" property-change event, which may
             // not have arrived yet.
             PlayPauseIcon.Glyph = "";
-            // M4: stops both this attempt's own stall watchdog AND a quality switch's — whichever
-            // of the two is currently running is whatever this Opened belongs to.
+            // M4: stops both this attempt's own stall watchdog AND a ReloadKeepingPosition one
+            // (quality, subtitle or mute trigger) — whichever is currently running is whatever
+            // this Opened belongs to.
             reloadArmed = false;
             stallTimer?.Stop();
             if (!hasPlayed)
@@ -1052,7 +1053,7 @@ public sealed partial class PlayerPage : Page
         UpdateQualityLabel();
     }
 
-    /// The shared reload mechanic behind a quality switch and a subtitle switch: mpv's own
+    /// The shared reload mechanic behind the quality, subtitle and mute-driven subtitle reloads: mpv's own
     /// "loadfile ... replace" on the existing MpvPlayerHost, not a fresh host — Load() only builds
     /// native state when nothing has started yet, so this is cheap and keeps the render pipeline
     /// (and its cold-start race, see MpvPlayerHost.OnRenderReady) out of a routine switch. Always
@@ -1123,13 +1124,16 @@ public sealed partial class PlayerPage : Page
     }
 
     /// A menu pick is the only caller that persists: Off stores "no preference", a track stores its
-    /// language. Re-picking what is already attached (same URL, same mode) changes nothing.
+    /// language. Re-picking what is already attached (same URL, same mode) reloads nothing but
+    /// still persists (spec: a menu pick always stores the preference, so Off-when-already-Off
+    /// still clears it). Only the menu items' Click handlers reach this method.
     private void OnSubtitlePicked(SubtitleChoice? choice)
     {
         var mode = SubtitleMuteMachine.OnManualPick(pickedOff: choice is null);
         if (choice?.Url == lastSubtitleUrl && mode == subtitleMode)
         {
             UpdateSubtitleChecks(); // a click re-checks the radio item either way; keep it truthful
+            App.Session.PlayerSettings.SaveSubtitleLanguage(choice?.Language);
             return;
         }
         ApplySubtitleChoice(choice, mode, persist: true);
@@ -1138,7 +1142,7 @@ public sealed partial class PlayerPage : Page
     /// Single entry point for changing what is attached (Task 6's mute automation calls it too).
     /// Stores the state, follows it in the menu, optionally persists the language preference, and —
     /// only if the attached URL actually changed while a load is live — reloads at the current
-    /// position through the quality switch's mechanic. Persistence is explicit rather than derived
+    /// position through ReloadKeepingPosition. Persistence is explicit rather than derived
     /// from mode: a user's Off must clear the preference, while the auto-apply on load and the
     /// mute automation's transitions must leave it alone.
     private void ApplySubtitleChoice(SubtitleChoice? choice, SubtitleMode mode, bool persist = false)

@@ -152,7 +152,8 @@ public sealed class StreamService(InnerTubeClient innerTube, VisitorDataStore vi
     }
 
     /// captions.playerCaptionsTracklistRenderer.captionTracks. The name is `runs[0].text` or
-    /// `simpleText` depending on the track; entries without a baseUrl or languageCode are skipped.
+    /// `simpleText` depending on the track; entries without a baseUrl or languageCode, or whose baseUrl is not an
+    /// absolute https URL (or contains ';'), are skipped.
     private static List<CaptionTrack> ParseCaptions(JsonElement json)
     {
         var tracks = new List<CaptionTrack>();
@@ -163,6 +164,9 @@ public sealed class StreamService(InnerTubeClient innerTube, VisitorDataStore vi
             if (track.ValueKind != JsonValueKind.Object) continue;
             if (Json.StringAt(track, "baseUrl") is not { Length: > 0 } url ||
                 Json.StringAt(track, "languageCode") is not { Length: > 0 } language) continue;
+            // The URL later reaches mpv's sub-add: only absolute https, no ';' (list separator).
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) ||
+                parsed.Scheme != Uri.UriSchemeHttps || url.Contains(';')) continue;
             var name = Json.ValueAt(track, "name/runs") is
                 { ValueKind: JsonValueKind.Array } runs && runs.GetArrayLength() > 0
                 ? Json.StringAt(runs[0], "text")
