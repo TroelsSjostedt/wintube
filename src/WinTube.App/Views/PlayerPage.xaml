@@ -78,7 +78,7 @@
                      are rebuilt in RenderSponsorMarkers (segments load, duration known, resize). -->
                 <Canvas x:Name="SponsorMarkers" Grid.Row="0" Height="4" VerticalAlignment="Center"
                         IsHitTestVisible="False"/>
-                <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto">
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto,Auto">
                     <Button x:Name="PlayPauseButton" Grid.Column="0" Click="OnPlayPauseClick"
                             Background="Transparent" BorderThickness="0">
                         <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE769;" FontSize="16"/>
@@ -124,7 +124,17 @@
                                     Background="Transparent" BorderThickness="0" Margin="0,0,4,0">
                         <DropDownButton.Flyout><MenuFlyout x:Name="SpeedFlyout"/></DropDownButton.Flyout>
                     </DropDownButton>
-                    <Button x:Name="FullScreenButton" Grid.Column="8" Click="OnFullScreenClick"
+                    <!-- CC picker: Collapsed until a stream with caption tracks has resolved
+                         (BuildSubtitleMenu). Lives in the bar only, so it is reachable in fullscreen
+                         with no mirrored title-row copy. -->
+                    <DropDownButton x:Name="SubtitleButton" Grid.Column="8" VerticalAlignment="Center"
+                                    Visibility="Collapsed" Background="Transparent" BorderThickness="0"
+                                    Margin="0,0,4,0" ToolTipService.ToolTip="Subtitles"
+                                    AutomationProperties.Name="Subtitles">
+                        <FontIcon Glyph="&#xE7F0;" FontSize="16"/>
+                        <DropDownButton.Flyout><MenuFlyout x:Name="SubtitleFlyout"/></DropDownButton.Flyout>
+                    </DropDownButton>
+                    <Button x:Name="FullScreenButton" Grid.Column="9" Click="OnFullScreenClick"
                             Background="Transparent" BorderThickness="0">
                         <FontIcon x:Name="FullScreenIcon" Glyph="&#xE740;" FontSize="16"/>
                     </Button>

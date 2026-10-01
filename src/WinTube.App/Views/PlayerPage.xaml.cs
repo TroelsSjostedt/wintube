@@ -73,6 +73,22 @@ public sealed partial class PlayerPage : Page
     /// flowing, Player.Position is authoritative and this goes stale on purpose.
     private double lastKnownPosition;
 
+    /// What the current attempt last handed Player.Load (the manifest path, or the muxed URL).
+    /// A subtitle switch reloads onto this same source; null until an attempt's Load has been
+    /// issued, so a pick during the resolve phase just stores state and the first Load carries it.
+    private string? loadTarget;
+
+    // MARK: subtitle picker state
+    private IReadOnlyList<CaptionTrack> captionTracks = [];
+    private SubtitleChoice? activeSubtitle;
+    private SubtitleMode subtitleMode = SubtitleMode.Off;
+    /// The subtitle URL every Player.Load passes (activeSubtitle?.Url) — a quality switch reloads
+    /// the file, and mpv drops external subtitles with it, so it must be re-attached each time.
+    private string? lastSubtitleUrl;
+    /// Menu entries paired with the choice each one applies (null = Off), so the checked mark can
+    /// follow activeSubtitle whoever changed it.
+    private readonly List<(RadioMenuFlyoutItem Item, SubtitleChoice? Choice)> subtitleItems = [];
+
     private IReadOnlyList<SponsorSegment> sponsorSegments = [];
     private readonly HashSet<string> sponsorSkipped = [];
     private DispatcherQueueTimer? toastTimer;
@@ -214,6 +230,9 @@ public sealed partial class PlayerPage : Page
         // second attempt's own early failure hitting RetryOrFailAsync's `handledFailure`
         // early-return, which skipped TearDownPlayer/ShowError and left the spinner forever.
         handledFailure = false;
+        // No load issued yet for this attempt — keeps ApplySubtitleChoice below from reloading a
+        // previous attempt's source.
+        loadTarget = null;
 
         // Resolved and seeded into lastKnownPosition before BuildQualityMenu can make the picker
         // clickable below — a quality switch during the loading ring, before this attempt's own
@@ -299,6 +318,15 @@ public sealed partial class PlayerPage : Page
         // its own videoDetails too) — just take whatever the latest attempt reports.
         SetDescription(stream.Description);
 
+        // The persisted preference auto-applies before the first Load, so the first load already
+        // carries the subtitle (no reload). persist stays false: re-saving the matched track's
+        // language here would narrow a "en" preference to "en-GB" the first time that track won.
+        // A ladder retry re-enters here and re-applies against its own captions.
+        captionTracks = stream.Captions;
+        var preferred = SubtitleSelection.Choose(captionTracks, App.Session.PlayerSettings.LoadSubtitleLanguage());
+        ApplySubtitleChoice(preferred, preferred is null ? SubtitleMode.Off : SubtitleMode.Manual);
+        BuildSubtitleMenu();
+
         CreatePlayerHost();
         Player!.Volume = App.Session.PlayerSettings.LoadVolume();
         // Fires OnVolumeSliderChanged, which re-applies the same volume and re-saves it —
@@ -312,7 +340,8 @@ public sealed partial class PlayerPage : Page
         // M3: a fresh MpvPlayerHost always starts at speed 1x — re-apply the session's chosen
         // speed so a ladder retry's new host matches what SpeedButton/the menu are still showing.
         Player.Speed = chosenSpeed;
-        Player.Load(target, resume, stream.UserAgent, stream.OriginalAudioLanguage, null);
+        loadTarget = target;
+        Player.Load(target, resume, stream.UserAgent, stream.OriginalAudioLanguage, lastSubtitleUrl);
 
         // Backstop watchdog, not the primary failure signal — Errored (mpv's network-timeout
         // fires it for a genuinely dead stream) is. This only catches a hang Errored never
@@ -621,7 +650,8 @@ public sealed partial class PlayerPage : Page
             // Never hides while there's nothing to show controls for, while paused, while the
             // pointer is resting on the bar itself, or while a flyout it owns is open.
             if (Player is null || Player.IsPaused || transportPointerOverBar ||
-                VolumeFlyout.IsOpen || SpeedFlyout.IsOpen) return;
+                VolumeFlyout.IsOpen || SpeedFlyout.IsOpen || QualityFlyoutBar.IsOpen ||
+                SubtitleFlyout.IsOpen) return;
             SetTransportVisible(false);
         };
         return timer;
@@ -933,28 +963,16 @@ public sealed partial class PlayerPage : Page
     }
 
     /// Reloads the already-started host onto the new rung's single-variant manifest, resuming
-    /// from the position it was just showing — mpv's own "loadfile ... replace" on the existing
-    /// MpvPlayerHost, not a fresh host: Load() only builds native state when nothing has started
-    /// yet, so this is cheap and keeps the render pipeline (and its cold-start race, see
-    /// MpvPlayerHost.OnRenderReady) out of a routine quality switch. Before the first Opened of
-    /// this attempt lands, Player.Position is still 0 (mpv hasn't seeked yet) — hasPlayed gates
-    /// between that and the seeded lastKnownPosition, so a quality click hit during the loading
-    /// ring reloads at the real resume point instead of the start of the file.
+    /// from the position it was just showing (see ReloadKeepingPosition).
     ///
     /// M2: WriteManifestForHeight touches disk (and now, M7, validates the kept variant's URI)
     /// on every call, not just the first — an IOException/UnauthorizedAccessException or an
     /// InvalidManifestVariantException from a menu click is routed through RetryOrFailAsync
     /// like any other failed attempt, instead of escaping the click handler and killing the
-    /// process. M4: restarts the stall watchdog, stopping the prior one first — which also
-    /// covers a switch clicked mid-open, since the original attempt's own timer never gets a
-    /// chance to fire once this one replaces it. M5: captures IsPaused before the reload and
-    /// hands it to host.Opened (see CreatePlayerHost) to re-apply once the new file is actually
-    /// open, since DoLoad always issues pause=no and re-pausing here would race that.
+    /// process.
     private void ReloadAtCurrentQuality()
     {
-        if (hlsMaster is null || Player is not { } player) return;
-        var position = hasPlayed ? player.Position : lastKnownPosition;
-        var wasPaused = player.IsPaused;
+        if (hlsMaster is null || Player is null) return;
 
         string path;
         try
@@ -972,17 +990,112 @@ public sealed partial class PlayerPage : Page
             return;
         }
 
+        ReloadKeepingPosition(path, "Quality switch did not complete.");
+        UpdateQualityLabel();
+    }
+
+    /// The shared reload mechanic behind a quality switch and a subtitle switch: mpv's own
+    /// "loadfile ... replace" on the existing MpvPlayerHost, not a fresh host — Load() only builds
+    /// native state when nothing has started yet, so this is cheap and keeps the render pipeline
+    /// (and its cold-start race, see MpvPlayerHost.OnRenderReady) out of a routine switch. Always
+    /// re-attaches lastSubtitleUrl: mpv drops an external subtitle with the file it was added to.
+    /// Before the first Opened of this attempt lands, Player.Position is still 0 (mpv hasn't
+    /// seeked yet) — hasPlayed gates between that and the seeded lastKnownPosition, so a switch
+    /// hit during the loading ring reloads at the real resume point instead of the start.
+    ///
+    /// M4: restarts the stall watchdog, stopping the prior one first — which also covers a switch
+    /// clicked mid-open, since the original attempt's own timer never gets a chance to fire once
+    /// this one replaces it. M5: captures IsPaused before the reload and hands it to host.Opened
+    /// (see CreatePlayerHost) to re-apply once the new file is actually open, since DoLoad always
+    /// issues pause=no and re-pausing here would race that.
+    private void ReloadKeepingPosition(string target, string stallReason)
+    {
+        if (Player is not { } player) return;
+        var position = hasPlayed ? player.Position : lastKnownPosition;
+        var wasPaused = player.IsPaused;
+
         stallTimer?.Stop();
         reloadArmed = true;
         stallTimer = dispatcher.CreateTimer();
         stallTimer.Interval = TimeSpan.FromSeconds(40);
         stallTimer.IsRepeating = false;
-        stallTimer.Tick += (_, _) => { if (reloadArmed) _ = RetryOrFailAsync("Quality switch did not complete."); };
+        stallTimer.Tick += (_, _) => { if (reloadArmed) _ = RetryOrFailAsync(stallReason); };
         stallTimer.Start();
 
         pauseAfterReload = wasPaused;
-        player.Load(path, position, lastUserAgent!, lastAudioLanguage, null);
-        UpdateQualityLabel();
+        loadTarget = target;
+        player.Load(target, position, lastUserAgent!, lastAudioLanguage, lastSubtitleUrl);
+    }
+
+    // MARK: subtitle picker
+
+    /// Rebuilds the CC menu for the resolved captions: Off, one entry per track (YouTube's own
+    /// Name, which already carries "(auto-generated)" for ASR), and "Translate to English" only
+    /// when the video has no English track of its own. The button shows only when there is
+    /// anything to pick. Checked marks come from activeSubtitle.
+    private void BuildSubtitleMenu()
+    {
+        SubtitleFlyout.Items.Clear();
+        subtitleItems.Clear();
+        SubtitleButton.Visibility = captionTracks.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (captionTracks.Count == 0) return;
+
+        AddSubtitleItem("Off", null);
+        foreach (var track in captionTracks)
+            AddSubtitleItem(track.Name, new SubtitleChoice(track.VttUrl, track.Language, track.Name, false));
+
+        var hasEnglish = captionTracks.Any(t =>
+            t.Language == "en" || t.Language.StartsWith("en-", StringComparison.Ordinal));
+        // With no English track, Choose(.., "en") is exactly the translation of the default track.
+        if (!hasEnglish && SubtitleSelection.Choose(captionTracks, "en") is { } translation)
+            AddSubtitleItem("Translate to English", translation);
+
+        UpdateSubtitleChecks();
+    }
+
+    private void AddSubtitleItem(string text, SubtitleChoice? choice)
+    {
+        var item = new RadioMenuFlyoutItem { Text = text, GroupName = "subtitle" };
+        item.Click += (_, _) => OnSubtitlePicked(choice);
+        SubtitleFlyout.Items.Add(item);
+        subtitleItems.Add((item, choice));
+    }
+
+    /// A menu pick is the only caller that persists: Off stores "no preference", a track stores its
+    /// language. Re-picking what is already attached (same URL, same mode) changes nothing.
+    private void OnSubtitlePicked(SubtitleChoice? choice)
+    {
+        var mode = SubtitleMuteMachine.OnManualPick(pickedOff: choice is null);
+        if (choice?.Url == lastSubtitleUrl && mode == subtitleMode)
+        {
+            UpdateSubtitleChecks(); // a click re-checks the radio item either way; keep it truthful
+            return;
+        }
+        ApplySubtitleChoice(choice, mode, persist: true);
+    }
+
+    /// Single entry point for changing what is attached (Task 6's mute automation calls it too).
+    /// Stores the state, follows it in the menu, optionally persists the language preference, and —
+    /// only if the attached URL actually changed while a load is live — reloads at the current
+    /// position through the quality switch's mechanic. Persistence is explicit rather than derived
+    /// from mode: a user's Off must clear the preference, while the auto-apply on load and the
+    /// mute automation's transitions must leave it alone.
+    private void ApplySubtitleChoice(SubtitleChoice? choice, SubtitleMode mode, bool persist = false)
+    {
+        var urlChanged = choice?.Url != lastSubtitleUrl;
+        activeSubtitle = choice;
+        subtitleMode = mode;
+        lastSubtitleUrl = choice?.Url;
+        UpdateSubtitleChecks();
+        if (persist) App.Session.PlayerSettings.SaveSubtitleLanguage(choice?.Language);
+        if (urlChanged && Player is not null && loadTarget is { } target)
+            ReloadKeepingPosition(target, "Subtitle switch did not complete.");
+    }
+
+    private void UpdateSubtitleChecks()
+    {
+        foreach (var (item, choice) in subtitleItems)
+            item.IsChecked = choice?.Url == activeSubtitle?.Url;
     }
 
     private void UpdateQualityLabel()
