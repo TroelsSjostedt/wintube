@@ -10,16 +10,20 @@ public sealed class PlayerSettingsStore(string dataDirectory)
 {
     private string FilePath => Path.Combine(dataDirectory, "settings.json");
 
-    /// Loads the settings from the JSON file as a JsonObject, tolerating missing file, bad JSON, and non-object roots.
-    /// Missing file, bad JSON, or duplicate keys return an empty object (defaults).
+    /// Loads the settings from the JSON file as a JsonObject, tolerating missing file, bad JSON, non-object roots,
+    /// duplicate keys, and lone surrogates. Returns an empty object on any error (defaults).
     private JsonObject Load()
     {
         try
         {
             var text = File.ReadAllText(FilePath);
-            return JsonNode.Parse(text) as JsonObject ?? new JsonObject();
+            var obj = JsonNode.Parse(text) as JsonObject ?? new JsonObject();
+            // Force materialization of lazy parsing to surface duplicate keys and lone surrogates
+            _ = obj.Count;
+            _ = obj.ToJsonString();
+            return obj;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException)
         {
             return new JsonObject();
         }
@@ -56,6 +60,7 @@ public sealed class PlayerSettingsStore(string dataDirectory)
     /// Saves the volume, preserving any other settings in the file.
     public void SaveVolume(double volume)
     {
+        if (double.IsNaN(volume)) return;
         var settings = Load();
         settings["volume"] = Math.Clamp(volume, 0.0, 1.0);
         Save(settings);

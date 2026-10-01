@@ -102,9 +102,11 @@ public class PlayerSettingsStoreTests : IDisposable
         File.WriteAllText(Path.Combine(dir, "settings.json"), """{"volume":0.5,"unknown":"value"}""");
         var store = new PlayerSettingsStore(dir);
         store.SaveVolume(0.8);
-        // Re-read file to check unknown key is preserved
+        // Re-read file to check unknown key's value and new volume are preserved
         var content = File.ReadAllText(Path.Combine(dir, "settings.json"));
-        Assert.Contains("unknown", content);
+        Assert.Contains("\"unknown\"", content);
+        Assert.Contains("\"value\"", content);
+        Assert.Contains("0.8", content);
     }
 
     [Fact]
@@ -132,5 +134,49 @@ public class PlayerSettingsStoreTests : IDisposable
         var store = new PlayerSettingsStore(dir);
         store.SaveSubtitleLanguage("");
         Assert.Null(store.LoadSubtitleLanguage());
+    }
+
+    [Fact]
+    public void DuplicateKeyFile_OperationsSucceed()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        // Duplicate keys in JSON trigger error during materialization
+        File.WriteAllText(Path.Combine(dir, "settings.json"), """{"volume":0.5,"volume":0.6}""");
+        var store = new PlayerSettingsStore(dir);
+        // All operations should succeed with defaults (not throw)
+        Assert.Equal(1.0, store.LoadVolume());
+        Assert.Null(store.LoadSubtitleLanguage());
+        store.SaveVolume(0.7);
+        Assert.Equal(0.7, store.LoadVolume(), 3);
+        store.SaveSubtitleLanguage("en");
+        Assert.Equal("en", store.LoadSubtitleLanguage());
+    }
+
+    [Fact]
+    public void LoneSurrogateInVolume_LoadsAsDefault()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        // Lone surrogate string like \ud800 causes InvalidOperationException on ToJsonString
+        File.WriteAllText(Path.Combine(dir, "settings.json"), "{\"subtitleLanguage\":\"\\ud800\"}");
+        var store = new PlayerSettingsStore(dir);
+        // Load should not throw, should return null (invalid surrogate)
+        Assert.Null(store.LoadSubtitleLanguage());
+        // Save should not throw
+        store.SaveVolume(0.6);
+        Assert.Equal(0.6, store.LoadVolume(), 3);
+    }
+
+    [Fact]
+    public void LoneSurrogateInUnknownKey_OperationsSucceed()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        // Lone surrogate in unknown key causes InvalidOperationException on ToJsonString
+        File.WriteAllText(Path.Combine(dir, "settings.json"), "{\"x\":\"\\ud800\"}");
+        var store = new PlayerSettingsStore(dir);
+        // Load should not throw
+        Assert.Equal(1.0, store.LoadVolume());
+        // Save should not throw
+        store.SaveSubtitleLanguage("de");
+        Assert.Equal("de", store.LoadSubtitleLanguage());
     }
 }
