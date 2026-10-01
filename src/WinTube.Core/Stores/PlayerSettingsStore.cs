@@ -10,16 +10,16 @@ public sealed class PlayerSettingsStore(string dataDirectory)
 {
     private string FilePath => Path.Combine(dataDirectory, "settings.json");
 
-    /// Loads the settings from the JSON file as a JsonNode, tolerating missing file and unknown keys.
-    /// Missing file or bad JSON returns an empty object (defaults).
-    private JsonNode Load()
+    /// Loads the settings from the JSON file as a JsonObject, tolerating missing file, bad JSON, and non-object roots.
+    /// Missing file, bad JSON, or duplicate keys return an empty object (defaults).
+    private JsonObject Load()
     {
         try
         {
             var text = File.ReadAllText(FilePath);
-            return JsonNode.Parse(text) ?? new JsonObject();
+            return JsonNode.Parse(text) as JsonObject ?? new JsonObject();
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
         {
             return new JsonObject();
         }
@@ -27,7 +27,7 @@ public sealed class PlayerSettingsStore(string dataDirectory)
 
     /// Saves the settings back to the JSON file, preserving all keys.
     /// A failed save costs one setting, not the session.
-    private void Save(JsonNode settings)
+    private void Save(JsonObject settings)
     {
         try
         {
@@ -44,24 +44,19 @@ public sealed class PlayerSettingsStore(string dataDirectory)
     /// MediaPlayer's own default, so a fresh install behaves exactly as before this store.
     public double LoadVolume()
     {
-        try
+        var settings = Load();
+        if (settings["volume"] is JsonValue v && v.TryGetValue(out double d))
         {
-            var settings = Load();
-            if (settings["volume"] == null) return 1.0;
-            var value = settings["volume"]!.AsValue().TryGetValue(out double d) ? d : 1.0;
-            if (double.IsNaN(value)) return 1.0;
-            return Math.Clamp(value, 0.0, 1.0);
+            if (double.IsNaN(d)) return 1.0;
+            return Math.Clamp(d, 0.0, 1.0);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return 1.0;
-        }
+        return 1.0;
     }
 
     /// Saves the volume, preserving any other settings in the file.
     public void SaveVolume(double volume)
     {
-        var settings = (JsonObject)Load();
+        var settings = Load();
         settings["volume"] = Math.Clamp(volume, 0.0, 1.0);
         Save(settings);
     }
@@ -69,23 +64,20 @@ public sealed class PlayerSettingsStore(string dataDirectory)
     /// The stored subtitle language preference, or null if not set or unreadable.
     public string? LoadSubtitleLanguage()
     {
-        try
+        var settings = Load();
+        if (settings["subtitleLanguage"] is JsonValue v && v.TryGetValue(out string? s))
         {
-            var settings = Load();
-            if (settings["subtitleLanguage"] == null) return null;
-            return settings["subtitleLanguage"]!.AsValue().TryGetValue(out string? s) ? s : null;
+            return s;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return null;
-        }
+        return null;
     }
 
-    /// Saves the subtitle language preference. Pass null to clear the preference.
+    /// Saves the subtitle language preference. Pass null or empty string to clear the preference.
     public void SaveSubtitleLanguage(string? language)
     {
-        var settings = (JsonObject)Load();
-        if (language == null)
+        var settings = Load();
+        // Treat empty string as null (off)
+        if (string.IsNullOrEmpty(language))
         {
             settings.Remove("subtitleLanguage");
         }
