@@ -312,7 +312,7 @@ public sealed partial class PlayerPage : Page
         // M3: a fresh MpvPlayerHost always starts at speed 1x — re-apply the session's chosen
         // speed so a ladder retry's new host matches what SpeedButton/the menu are still showing.
         Player.Speed = chosenSpeed;
-        Player.Load(target, resume, stream.UserAgent, stream.OriginalAudioLanguage);
+        Player.Load(target, resume, stream.UserAgent, stream.OriginalAudioLanguage, null);
 
         // Backstop watchdog, not the primary failure signal — Errored (mpv's network-timeout
         // fires it for a genuinely dead stream) is. This only catches a hang Errored never
@@ -981,7 +981,7 @@ public sealed partial class PlayerPage : Page
         stallTimer.Start();
 
         pauseAfterReload = wasPaused;
-        player.Load(path, position, lastUserAgent!, lastAudioLanguage);
+        player.Load(path, position, lastUserAgent!, lastAudioLanguage, null);
         UpdateQualityLabel();
     }
 

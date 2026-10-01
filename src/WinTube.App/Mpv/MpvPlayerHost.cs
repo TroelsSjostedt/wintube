@@ -58,6 +58,19 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         }
     }
 
+    /// Hides or shows the attached subtitle without detaching it. Like Volume/Speed, a value set
+    /// before the pipeline is Live is stored and applied by CreateMpv; later loads inherit it
+    /// because sub-visibility is session state in mpv, not per-file.
+    public bool SubtitleVisible
+    {
+        get => subtitleVisible;
+        set
+        {
+            subtitleVisible = value;
+            if (Live) ApplySubtitleVisibility();
+        }
+    }
+
     // Dispose hands the handle to the teardown thread, so the UI must stop using it the moment
     // `disposed` is set, not when `mpv` is finally zeroed over there.
     private bool Live => !disposed && mpv != IntPtr.Zero;
@@ -72,6 +85,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     private bool renderReady; // UI thread only; set by OnRenderReady
     private PendingLoad? pendingLoad;
     private double volume = 1.0, speed = 1.0;
+    private bool subtitleVisible = true;
     private bool eofReached; // edge-detects eof-reached false->true; event thread only
 
     // Load->FileLoaded timing, logged on open so the stall-timer window can be tuned from real
@@ -96,7 +110,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     private readonly MpvNative.GetProcAddressFn getProcAddress;
     private readonly MpvNative.UpdateFn onUpdate;
 
-    private readonly record struct PendingLoad(string UrlOrPath, double StartAtSeconds, string UserAgent, string? AudioLanguage);
+    private readonly record struct PendingLoad(string UrlOrPath, double StartAtSeconds, string UserAgent, string? AudioLanguage, string? SubtitleUrl);
 
     public MpvPlayerHost()
     {
@@ -111,10 +125,10 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         Loaded += OnLoaded;
     }
 
-    public void Load(string urlOrPath, double startAtSeconds, string userAgent, string? audioLanguage)
+    public void Load(string urlOrPath, double startAtSeconds, string userAgent, string? audioLanguage, string? subtitleUrl)
     {
         if (disposed) return;
-        var request = new PendingLoad(urlOrPath, startAtSeconds, userAgent, audioLanguage);
+        var request = new PendingLoad(urlOrPath, startAtSeconds, userAgent, audioLanguage, subtitleUrl);
         if (!loadedIntoTree)
         {
             pendingLoad = request; // applied from OnLoaded once the panel has a real size
@@ -227,12 +241,14 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         renderThread.Start();
     }
 
-    /// user-agent/alang are set fresh before every load (not just the first), per-file, so a
-    /// second Load() on a reused host picks up a different video's values.
+    /// user-agent/alang/sub-files are set fresh before every load (not just the first), per-file,
+    /// so a second Load() on a reused host picks up a different video's values. sub-files is reset
+    /// to empty when there is no subtitle, or the previous load's track would attach to this one.
     private void DoLoad(PendingLoad request)
     {
         MpvNative.SetOption(mpv, "user-agent", request.UserAgent);
         MpvNative.SetOption(mpv, "alang", request.AudioLanguage ?? "");
+        MpvNative.SetOption(mpv, "sub-files", request.SubtitleUrl ?? "");
         loadStartedAt = DateTimeOffset.UtcNow;
         loadKind = ClassifyKind(request.UrlOrPath);
         // Per-load start= avoids seeking after open; pause=no clears a prior load's paused state.
@@ -268,6 +284,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         Com.Check(MpvNative.mpv_initialize(mpv), "mpv_initialize");
         MpvNative.SetPropertyDouble(mpv, "volume", volume * 100);
         MpvNative.SetPropertyDouble(mpv, "speed", speed);
+        ApplySubtitleVisibility();
         MpvNative.mpv_observe_property(mpv, PosUserdata, Utf8("time-pos"), MpvNative.FormatDouble);
         MpvNative.mpv_observe_property(mpv, DurUserdata, Utf8("duration"), MpvNative.FormatDouble);
         MpvNative.mpv_observe_property(mpv, PauseUserdata, Utf8("pause"), MpvNative.FormatFlag);
@@ -276,6 +293,9 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         // false->true edge (HandlePropertyChange) instead of the end-file event.
         MpvNative.mpv_observe_property(mpv, EofUserdata, Utf8("eof-reached"), MpvNative.FormatFlag);
     }
+
+    private void ApplySubtitleVisibility() =>
+        MpvNative.Command(mpv, "set", "sub-visibility", subtitleVisible ? "yes" : "no");
 
     private static byte[] Utf8(string s) => Encoding.UTF8.GetBytes(s + "\0");
 
