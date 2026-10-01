@@ -26,7 +26,7 @@ jobs:
       - name: Install vpk
         run: dotnet tool install -g vpk
       - name: Download previous releases (delta chain)
-        run: vpk download github --repoUrl https://github.com/TroelsSjostedt/wintube
+        run: vpk download github --repoUrl https://github.com/TroelsSjostedt/wintube --token ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
       - name: Pack
         run: >
