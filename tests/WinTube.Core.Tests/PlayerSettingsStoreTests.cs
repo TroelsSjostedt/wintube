@@ -44,4 +44,30 @@ public class PlayerSettingsStoreTests : IDisposable
             $"{{\"volume\":{(double.IsNaN(stored) ? "\"NaN\"" : stored.ToString(System.Globalization.CultureInfo.InvariantCulture))}}}");
         Assert.Equal(expected, new PlayerSettingsStore(directory).LoadVolume());
     }
+
+    [Fact]
+    public void SavingSubtitle_PreservesVolume_AndViceVersa()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var store = new PlayerSettingsStore(dir);
+        store.SaveVolume(0.42);
+        store.SaveSubtitleLanguage("en");
+        Assert.Equal(0.42, store.LoadVolume(), 3);
+        Assert.Equal("en", store.LoadSubtitleLanguage());
+        store.SaveVolume(0.9);
+        Assert.Equal("en", store.LoadSubtitleLanguage());
+        store.SaveSubtitleLanguage(null);
+        Assert.Null(store.LoadSubtitleLanguage());
+        Assert.Equal(0.9, store.LoadVolume(), 3);
+    }
+
+    [Fact]
+    public void OldVolumeOnlyFile_StillLoads()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "settings.json"), """{"volume":0.5}""");
+        var store = new PlayerSettingsStore(dir);
+        Assert.Equal(0.5, store.LoadVolume(), 3);
+        Assert.Null(store.LoadSubtitleLanguage());
+    }
 }
