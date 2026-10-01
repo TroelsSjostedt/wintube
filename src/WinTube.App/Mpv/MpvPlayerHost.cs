@@ -7,6 +7,10 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace WinTube.App.Mpv;
 
+/// One audio track of the open file, as mpv's track-list reports it. Id is mpv's own track id (what
+/// `aid` takes), not a list index. Language/Title are null when the container leaves them blank.
+public sealed record AudioTrackInfo(int Id, string? Language, string? Title);
+
 /// Owns one libmpv instance end to end: the D3D11 device, the composition swap chain attached to
 /// a child SwapChainPanel, the render-API/ANGLE pipeline, and the property/event plumbing. Uses
 /// mpv's render API rather than a child HWND: a composition SwapChainPanel has no HWND of its
@@ -33,6 +37,19 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     public event Action<bool>? PausedChanged;
     public event Action? EndReached;
     public event Action<string>? Errored;
+
+    /// Raised on the UI thread after Opened, once per FileLoaded (reloads included), with
+    /// AudioTracks/SelectedAudioId already updated — also for a file with 0 or 1 audio tracks,
+    /// so a consumer's picker hides again when a reload lands on a muxed single-track source.
+    public event Action? AudioTracksChanged;
+
+    /// The open file's audio tracks, valid from the latest AudioTracksChanged on (stale between a
+    /// Load and the next FileLoaded). UI thread only.
+    public IReadOnlyList<AudioTrackInfo> AudioTracks { get; private set; } = [];
+
+    /// The track mpv had selected when the file loaded (its alang pick), then whichever
+    /// SelectAudioTrack last set; null when no audio track is selected. UI thread only.
+    public int? SelectedAudioId { get; private set; }
 
     public double Position { get; private set; }
     public double Duration { get; private set; }
@@ -140,6 +157,14 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     public void Play() { if (Live) MpvNative.Command(mpv, "set", "pause", "no"); }
     public void Pause() { if (Live) MpvNative.Command(mpv, "set", "pause", "yes"); }
     public void TogglePause() { if (Live) MpvNative.Command(mpv, "cycle", "pause"); }
+
+    /// Live switch via `aid`: no reload, no seek. A stale or unknown id is ignored by mpv.
+    public void SelectAudioTrack(int id)
+    {
+        if (!Live) return;
+        MpvNative.Command(mpv, "set", "aid", id.ToString(CultureInfo.InvariantCulture));
+        SelectedAudioId = id;
+    }
 
     public void SeekTo(double seconds)
     {
@@ -386,6 +411,13 @@ public sealed class MpvPlayerHost : Grid, IDisposable
                     case MpvNative.EventId.FileLoaded:
                         Log(FormattableString.Invariant($"open: {(DateTimeOffset.UtcNow - loadStartedAt).TotalSeconds:F1}s {loadKind}"));
                         Post(() => Opened?.Invoke());
+                        var (audioTracks, selectedAudioId) = ReadAudioTracks();
+                        Post(() =>
+                        {
+                            AudioTracks = audioTracks;
+                            SelectedAudioId = selectedAudioId;
+                            AudioTracksChanged?.Invoke();
+                        });
                         break;
                     case MpvNative.EventId.EndFile: HandleEndFile(ev); break;
                     case MpvNative.EventId.PropertyChange: HandlePropertyChange(ev); break;
@@ -397,6 +429,40 @@ public sealed class MpvPlayerHost : Grid, IDisposable
             Post(() => Errored?.Invoke($"event loop: {ex.Message}"));
         }
     }
+
+    /// Reads mpv's track-list through its string sub-properties (track-list/count, then
+    /// track-list/N/type|id|lang|title|selected) — simpler than decoding the node tree through
+    /// P/Invoke. Event thread only, at FileLoaded, when mpv has already made its alang pick. Audio
+    /// metadata is a nicety: any failure here yields "no tracks" rather than ending the event loop.
+    private (IReadOnlyList<AudioTrackInfo> Tracks, int? SelectedId) ReadAudioTracks()
+    {
+        var tracks = new List<AudioTrackInfo>();
+        int? selectedId = null;
+        try
+        {
+            if (!int.TryParse(MpvNative.GetPropertyString(mpv, "track-list/count"), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var count)) return (tracks, null);
+            for (var i = 0; i < count; i++)
+            {
+                var prefix = FormattableString.Invariant($"track-list/{i}/");
+                if (MpvNative.GetPropertyString(mpv, prefix + "type") != "audio") continue;
+                if (!int.TryParse(MpvNative.GetPropertyString(mpv, prefix + "id"), NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out var id)) continue;
+                tracks.Add(new AudioTrackInfo(id,
+                    NullIfEmpty(MpvNative.GetPropertyString(mpv, prefix + "lang")),
+                    NullIfEmpty(MpvNative.GetPropertyString(mpv, prefix + "title"))));
+                if (MpvNative.GetPropertyString(mpv, prefix + "selected") == "yes") selectedId = id;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"track-list read failed: {ex.Message}");
+            return ([], null);
+        }
+        return (tracks, selectedId);
+    }
+
+    private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
     /// eof-reached (below) owns EndReached; end-file's eof reason never fires with keep-open=yes.
     /// This stays for load failures, which still end the file via this event.

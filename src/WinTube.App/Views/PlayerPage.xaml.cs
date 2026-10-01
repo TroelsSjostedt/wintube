@@ -93,6 +93,16 @@ public sealed partial class PlayerPage : Page
     /// follow activeSubtitle whoever changed it.
     private readonly List<(RadioMenuFlyoutItem Item, SubtitleChoice? Choice)> subtitleItems = [];
 
+    // MARK: audio track picker state
+    /// The language of the dub the viewer picked from the audio menu, for THIS video only (reset in
+    /// OnNavigatedTo, deliberately not persisted). Every reload and ladder retry opens a fresh file
+    /// on which mpv re-picks via alang, so AudioTracksChanged re-applies this after each open.
+    /// Null until a pick, and stays null when the picked track carries no language to match on.
+    private string? chosenAudioLanguage;
+    /// Menu entries paired with the mpv track id each one selects, so the checked mark can follow
+    /// the host's SelectedAudioId whoever changed it (a pick, or the re-apply after a reload).
+    private readonly List<(RadioMenuFlyoutItem Item, int TrackId)> audioItems = [];
+
     private IReadOnlyList<SponsorSegment> sponsorSegments = [];
     private readonly HashSet<string> sponsorSkipped = [];
     private DispatcherQueueTimer? toastTimer;
@@ -173,6 +183,8 @@ public sealed partial class PlayerPage : Page
         SpeedButton.Content = "1×";
         if (speedOneItem is not null) speedOneItem.IsChecked = true;
         chosenSpeed = 1.0;
+        chosenAudioLanguage = null;
+        ClearAudioMenu();
 
         leftPage = false;
         retried = false;
@@ -416,6 +428,8 @@ public sealed partial class PlayerPage : Page
             stale.Dispose();
         }
 
+        // A fresh host has no tracks until its own FileLoaded; don't offer the previous one's.
+        ClearAudioMenu();
         var host = new MpvPlayerHost();
         host.Opened += () =>
         {
@@ -453,6 +467,7 @@ public sealed partial class PlayerPage : Page
                 host.Pause();
             }
         };
+        host.AudioTracksChanged += () => { if (!leftPage && host == Player) OnAudioTracksChanged(host); };
         host.PositionChanged += _ => { if (host == Player) { OnPlayerPosition(); UpdateTransport(); UpdateSkipButtonVisibility(); } };
         // time-pos stops ticking the instant playback pauses, so UpdateTransport (driven off
         // PositionChanged) can't be trusted to refresh the play/pause icon — mpv's own "pause"
@@ -710,7 +725,7 @@ public sealed partial class PlayerPage : Page
             // pointer is resting on the bar itself, or while a flyout it owns is open.
             if (Player is null || Player.IsPaused || transportPointerOverBar ||
                 VolumeFlyout.IsOpen || SpeedFlyout.IsOpen || QualityFlyoutBar.IsOpen ||
-                SubtitleFlyout.IsOpen) return;
+                SubtitleFlyout.IsOpen || AudioFlyout.IsOpen) return;
             SetTransportVisible(false);
         };
         return timer;
@@ -1161,6 +1176,82 @@ public sealed partial class PlayerPage : Page
     {
         foreach (var (item, choice) in subtitleItems)
             item.IsChecked = choice?.Url == activeSubtitle?.Url;
+    }
+
+    // MARK: audio track picker
+
+    /// Runs after every FileLoaded (first load, quality/subtitle/mute reload, ladder retry): the
+    /// tracks can differ per quality rung, so the menu is rebuilt each time. If the viewer already
+    /// picked a dub on this video and mpv's alang pick on the new file landed elsewhere, the pick
+    /// is re-applied — a live `aid` switch, no further reload.
+    private void OnAudioTracksChanged(MpvPlayerHost host)
+    {
+        ReapplyChosenAudio(host);
+        BuildAudioMenu(host);
+    }
+
+    private void ReapplyChosenAudio(MpvPlayerHost host)
+    {
+        if (chosenAudioLanguage is not { } wanted) return;
+        var tracks = host.AudioTracks;
+        // mpv's own pick already carries the language: leave it, even when a second track shares it.
+        if (tracks.FirstOrDefault(t => t.Id == host.SelectedAudioId)?.Language == wanted) return;
+        var match = tracks.FirstOrDefault(t => t.Language == wanted)
+            ?? tracks.FirstOrDefault(t => t.Language is { } l && PrimarySubtag(l) == PrimarySubtag(wanted));
+        if (match is not null && match.Id != host.SelectedAudioId) host.SelectAudioTrack(match.Id);
+    }
+
+    private static string PrimarySubtag(string language)
+    {
+        var dash = language.IndexOf('-');
+        return dash < 0 ? language : language[..dash];
+    }
+
+    /// One radio entry per audio track, the button shown only when there is a choice to make (a
+    /// muxed single-track fallback, or an adaptive rung with one rendition, hides it). The label
+    /// is the track's Title, else its Language, else "Track N" by position.
+    private void BuildAudioMenu(MpvPlayerHost host)
+    {
+        ClearAudioMenu();
+        var tracks = host.AudioTracks;
+        if (tracks.Count <= 1) return;
+
+        for (var i = 0; i < tracks.Count; i++)
+        {
+            var track = tracks[i];
+            var label = !string.IsNullOrWhiteSpace(track.Title) ? track.Title
+                : !string.IsNullOrWhiteSpace(track.Language) ? track.Language
+                : $"Track {i + 1}";
+            var item = new RadioMenuFlyoutItem { Text = label, GroupName = "audiotrack" };
+            item.Click += (_, _) => OnAudioPicked(track);
+            AudioFlyout.Items.Add(item);
+            audioItems.Add((item, track.Id));
+        }
+        AudioButton.Visibility = Visibility.Visible;
+        UpdateAudioChecks();
+    }
+
+    private void ClearAudioMenu()
+    {
+        AudioFlyout.Items.Clear();
+        audioItems.Clear();
+        AudioButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnAudioPicked(AudioTrackInfo track)
+    {
+        chosenAudioLanguage = track.Language;
+        Player?.SelectAudioTrack(track.Id);
+        UpdateAudioChecks();
+    }
+
+    /// Follows the host's SelectedAudioId (what mpv picked via alang until a pick is made); with no
+    /// track flagged selected, the first entry shows as checked.
+    private void UpdateAudioChecks()
+    {
+        var selected = Player?.SelectedAudioId ?? (audioItems.Count > 0 ? audioItems[0].TrackId : (int?)null);
+        foreach (var (item, id) in audioItems)
+            item.IsChecked = id == selected;
     }
 
     private void UpdateQualityLabel()

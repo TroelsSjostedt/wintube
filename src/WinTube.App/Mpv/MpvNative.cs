@@ -17,6 +17,8 @@ internal static class MpvNative
     [DllImport(Lib)] internal static extern int mpv_set_option_string(IntPtr handle, byte[] name, byte[] value);
     [DllImport(Lib)] internal static extern int mpv_command(IntPtr handle, IntPtr[] args);
     [DllImport(Lib)] internal static extern int mpv_set_property(IntPtr handle, byte[] name, int format, ref double data);
+    [DllImport(Lib)] internal static extern IntPtr mpv_get_property_string(IntPtr handle, byte[] name);
+    [DllImport(Lib)] internal static extern void mpv_free(IntPtr data);
     [DllImport(Lib)] internal static extern int mpv_observe_property(IntPtr handle, ulong userdata, byte[] name, int format);
     [DllImport(Lib)] internal static extern IntPtr mpv_wait_event(IntPtr handle, double timeout);
     [DllImport(Lib)] internal static extern void mpv_wakeup(IntPtr handle);
@@ -72,6 +74,17 @@ internal static class MpvNative
 
     internal static void SetPropertyDouble(IntPtr handle, string name, double value) =>
         mpv_set_property(handle, Utf8(name), FormatDouble, ref value);
+
+    /// One property as mpv's string rendering of it, or null when it is unavailable (no such
+    /// property, no file yet, a sub-property that doesn't exist for that track). mpv allocates the
+    /// returned buffer, so it is copied out and handed straight back to mpv_free.
+    internal static string? GetPropertyString(IntPtr handle, string name)
+    {
+        var raw = mpv_get_property_string(handle, Utf8(name));
+        if (raw == IntPtr.Zero) return null;
+        try { return Marshal.PtrToStringUTF8(raw); }
+        finally { mpv_free(raw); }
+    }
 
     internal static string ErrorString(int error) =>
         Marshal.PtrToStringUTF8(mpv_error_string(error)) ?? $"mpv error {error}";
