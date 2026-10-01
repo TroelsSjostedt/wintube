@@ -85,6 +85,10 @@ public sealed partial class PlayerPage : Page
     /// The subtitle URL every Player.Load passes (activeSubtitle?.Url) — a quality switch reloads
     /// the file, and mpv drops external subtitles with it, so it must be re-attached each time.
     private string? lastSubtitleUrl;
+    /// Whether the volume was at zero the last time the mute automation looked. The slider fires
+    /// ValueChanged on every notch of a drag; only a change of this flag is a mute edge, so
+    /// sliding 40 -> 20 -> 0 -> 0 acts exactly once, at the first 0.
+    private bool wasMuted;
     /// Menu entries paired with the choice each one applies (null = Off), so the checked mark can
     /// follow activeSubtitle whoever changed it.
     private readonly List<(RadioMenuFlyoutItem Item, SubtitleChoice? Choice)> subtitleItems = [];
@@ -233,6 +237,10 @@ public sealed partial class PlayerPage : Page
         // No load issued yet for this attempt — keeps ApplySubtitleChoice below from reloading a
         // previous attempt's source.
         loadTarget = null;
+        // A pending reload window belongs to the host this attempt replaces; the failed attempt's
+        // re-pause must not carry over to a fresh host's first Opened.
+        reloadArmed = false;
+        pauseAfterReload = false;
 
         // Resolved and seeded into lastKnownPosition before BuildQualityMenu can make the picker
         // clickable below — a quality switch during the loading ring, before this attempt's own
@@ -325,10 +333,21 @@ public sealed partial class PlayerPage : Page
         captionTracks = stream.Captions;
         var preferred = SubtitleSelection.Choose(captionTracks, App.Session.PlayerSettings.LoadSubtitleLanguage());
         ApplySubtitleChoice(preferred, preferred is null ? SubtitleMode.Off : SubtitleMode.Manual);
+
+        // The slider's ValueChanged below can't be trusted to report the mute state of this load:
+        // it is suppressed when the value equals what the slider already held (a fresh 0-default
+        // slider loading a saved 0), and a ladder retry re-applies the preference above — which
+        // resets subtitleMode — while the slider still sits at 0 and fires nothing. So the saved
+        // volume is checked explicitly here, before the first Load, and wasMuted is seeded to it
+        // so the slider event that does fire (or not) is judged against the same baseline. Nothing
+        // is loaded yet, so a muted Off attaches through the first Load with no reload.
+        var volume = App.Session.PlayerSettings.LoadVolume();
+        wasMuted = volume <= 0;
+        ApplyMuteState(wasMuted);
         BuildSubtitleMenu();
 
         CreatePlayerHost();
-        Player!.Volume = App.Session.PlayerSettings.LoadVolume();
+        Player!.Volume = volume;
         // Fires OnVolumeSliderChanged, which re-applies the same volume and re-saves it —
         // harmless, and the simplest way to keep the slider and the host in sync on every load.
         var volumePercent = Player.Volume * 100;
@@ -530,6 +549,45 @@ public sealed partial class PlayerPage : Page
         volumeSaveTimer ??= CreateVolumeSaveTimer();
         volumeSaveTimer.Stop();
         volumeSaveTimer.Start();
+
+        var nowMuted = e.NewValue <= 0;
+        if (nowMuted == wasMuted) return;
+        wasMuted = nowMuted;
+        ApplyMuteState(nowMuted);
+    }
+
+    /// The mute automation: asks the pure state machine what a mute edge does to the current
+    /// subtitle mode and carries it out. Off + mute attaches the best track as AutoMute;
+    /// AutoMute + unmute detaches it; Manual never moves. Neither transition persists — the saved
+    /// preference is the user's, and the automation must not rewrite it.
+    ///
+    /// Reload cost: with a load live, attaching or detaching changes the URL and so reloads at
+    /// position (ReloadKeepingPosition) — a brief rebuffer, accepted since mute is deliberate.
+    /// A Manual track is already attached, so mute/unmute on it touches nothing at all.
+    private void ApplyMuteState(bool nowMuted)
+    {
+        var next = SubtitleMuteMachine.OnMuteChanged(subtitleMode, nowMuted);
+        if (next == subtitleMode) return;
+        if (next == SubtitleMode.AutoMute)
+        {
+            // A video with nothing to attach stays Off — there is nothing for unmute to retire.
+            if (BestMuteChoice() is { } best) ApplySubtitleChoice(best, SubtitleMode.AutoMute);
+        }
+        else
+        {
+            ApplySubtitleChoice(null, next);
+        }
+    }
+
+    /// The track the mute automation attaches: the saved language preference through the usual
+    /// chain, else — no preference, or none that matches this video — the video's default track
+    /// (the first manual one, falling back to the first of any kind), as a plain Track choice.
+    private SubtitleChoice? BestMuteChoice()
+    {
+        if (SubtitleSelection.Choose(captionTracks, App.Session.PlayerSettings.LoadSubtitleLanguage()) is { } preferred)
+            return preferred;
+        var fallback = captionTracks.FirstOrDefault(t => !t.IsAutoGenerated) ?? captionTracks.FirstOrDefault();
+        return fallback is null ? null : new SubtitleChoice(fallback.VttUrl, fallback.Language, fallback.Name, false);
     }
 
     /// percent is 0..100, matching VolumeSlider's own range — mute, then three roughly-even
@@ -1012,7 +1070,10 @@ public sealed partial class PlayerPage : Page
     {
         if (Player is not { } player) return;
         var position = hasPlayed ? player.Position : lastKnownPosition;
-        var wasPaused = player.IsPaused;
+        // A second reload landing inside the first's open window sees IsPaused false (the first
+        // load's pause=no already went out), so a re-pause still pending from that first reload
+        // is carried forward instead of being overwritten with false.
+        var repause = player.IsPaused || (reloadArmed && pauseAfterReload);
 
         stallTimer?.Stop();
         reloadArmed = true;
@@ -1022,7 +1083,7 @@ public sealed partial class PlayerPage : Page
         stallTimer.Tick += (_, _) => { if (reloadArmed) _ = RetryOrFailAsync(stallReason); };
         stallTimer.Start();
 
-        pauseAfterReload = wasPaused;
+        pauseAfterReload = repause;
         loadTarget = target;
         player.Load(target, position, lastUserAgent!, lastAudioLanguage, lastSubtitleUrl);
     }
