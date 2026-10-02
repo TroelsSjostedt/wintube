@@ -74,8 +74,13 @@
                 </Grid.RowDefinitions>
                 <Slider x:Name="SeekBar" Grid.Row="0" Minimum="0" StepFrequency="1"
                         ThumbToolTipValueConverter="{x:Null}" SizeChanged="OnSeekBarSizeChanged"/>
-                <!-- Sits in the same cell as SeekBar so it tracks the slider's own width; markers
-                     are rebuilt in RenderSponsorMarkers (segments load, duration known, resize). -->
+                <!-- Both overlays sit in the same cell as SeekBar so they track the slider's own
+                     width. Z-order is document order: BufferedMarkers is declared first so the
+                     yellow sponsor rectangles draw over it. Buffered ranges are rebuilt in
+                     RenderBufferedRanges (cache poll, duration known, resize); sponsor markers in
+                     RenderSponsorMarkers (segments load, duration known, resize). -->
+                <Canvas x:Name="BufferedMarkers" Grid.Row="0" Height="4" VerticalAlignment="Center"
+                        IsHitTestVisible="False"/>
                 <Canvas x:Name="SponsorMarkers" Grid.Row="0" Height="4" VerticalAlignment="Center"
                         IsHitTestVisible="False"/>
                 <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">

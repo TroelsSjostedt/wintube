@@ -115,6 +115,8 @@ public sealed partial class PlayerPage : Page
     private SponsorSegment? skipCandidate;
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush SponsorMarkerBrush =
         new(Windows.UI.Color.FromArgb(179, 0xE6, 0xC2, 0x1F));   // ~70% opacity caution yellow
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush BufferedRangeBrush =
+        new(Windows.UI.Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF));  // ~40% white: a light-grey wash over the track
     /// Cached result of GetThumbInset() — set once the live Thumb part has a real ActualWidth.
     private double? thumbInset;
 
@@ -430,7 +432,18 @@ public sealed partial class PlayerPage : Page
 
         // A fresh host has no tracks until its own FileLoaded; don't offer the previous one's.
         ClearAudioMenu();
-        var host = new MpvPlayerHost();
+        // Cache sizing is read once per host and applied when mpv is created (first Load), so a
+        // settings.json edit takes effect from the next video.
+        var settings = App.Session.PlayerSettings;
+        var host = new MpvPlayerHost
+        {
+            CacheReadaheadSeconds = settings.CacheReadaheadSeconds(),
+            CacheForwardMegabytes = settings.CacheForwardMegabytes(),
+            CacheBackMegabytes = settings.CacheBackMegabytes(),
+        };
+        // A fresh host has cached nothing; don't leave the previous one's ranges drawn.
+        BufferedMarkers.Children.Clear();
+        host.BufferedRangesChanged += () => { if (!leftPage && host == Player) RenderBufferedRanges(); };
         host.Opened += () =>
         {
             if (leftPage || host != Player) return;
@@ -531,6 +544,7 @@ public sealed partial class PlayerPage : Page
         {
             markersDuration = p.Duration;
             RenderSponsorMarkers();
+            RenderBufferedRanges();
         }
     }
 
@@ -781,11 +795,7 @@ public sealed partial class PlayerPage : Page
     private void RenderSponsorMarkers()
     {
         SponsorMarkers.Children.Clear();
-        var trackWidth = SeekBar.ActualWidth;
-        var duration = markersDuration;
-        var inset = GetThumbInset();
-        var span = trackWidth - 2 * inset;
-        if (span <= 0 || duration <= 0) return;
+        if (!TryGetTrackMapping(out var duration, out var inset, out var span)) return;
 
         foreach (var segment in sponsorSegments)
         {
@@ -798,6 +808,42 @@ public sealed partial class PlayerPage : Page
             Canvas.SetLeft(rect, inset + segment.Start / duration * span);
             SponsorMarkers.Children.Add(rect);
         }
+    }
+
+    /// Draws the cached ranges as light-grey bars under the sponsor markers. Same mapping as
+    /// RenderSponsorMarkers (TryGetTrackMapping), so a range edge lands exactly where the thumb
+    /// would be at that time. Called on BufferedRangesChanged, duration becoming known and resize;
+    /// a handful of ranges, so clear-and-redraw.
+    private void RenderBufferedRanges()
+    {
+        BufferedMarkers.Children.Clear();
+        if (Player is not { } p || !TryGetTrackMapping(out var duration, out var inset, out var span)) return;
+
+        foreach (var (start, end) in p.BufferedRanges)
+        {
+            var from = Math.Clamp(start, 0, duration);
+            var to = Math.Clamp(end, 0, duration);
+            if (to <= from) continue;
+            var rect = new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Width = Math.Max(1, (to - from) / duration * span),
+                Height = 4,
+                Fill = BufferedRangeBrush,
+            };
+            Canvas.SetLeft(rect, inset + from / duration * span);
+            BufferedMarkers.Children.Add(rect);
+        }
+    }
+
+    /// The shared overlay mapping: x(t) = inset + t / duration * span, with span = trackWidth -
+    /// 2 * inset (see RenderSponsorMarkers for why the inset). False while the seek bar has no
+    /// usable width or duration is unknown, in which case there is nothing to draw.
+    private bool TryGetTrackMapping(out double duration, out double inset, out double span)
+    {
+        duration = markersDuration;
+        inset = GetThumbInset();
+        span = SeekBar.ActualWidth - 2 * inset;
+        return span > 0 && duration > 0;
     }
 
     /// Half the width of SeekBar's own Thumb part, found once via VisualTreeHelper and cached —
@@ -833,12 +879,17 @@ public sealed partial class PlayerPage : Page
     private void ClearSponsorMarkers()
     {
         SponsorMarkers.Children.Clear();
+        BufferedMarkers.Children.Clear();
         markersDuration = -1;
         skipCandidate = null;
         SkipBlockButton.Visibility = Visibility.Collapsed;
     }
 
-    private void OnSeekBarSizeChanged(object sender, SizeChangedEventArgs e) => RenderSponsorMarkers();
+    private void OnSeekBarSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        RenderSponsorMarkers();
+        RenderBufferedRanges();
+    }
 
     /// Shows the skip-ahead button from 10s before a segment's start through its end. Also stays
     /// visible INSIDE a segment: sponsorSkipped's skip-once rule means auto-skip (OnPlayerPosition)

@@ -51,6 +51,22 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     /// SelectAudioTrack last set; null when no audio track is selected. UI thread only.
     public int? SelectedAudioId { get; private set; }
 
+    /// Raised on the UI thread when the set of cached (seekable) ranges differs from the last one
+    /// raised. Polled about once a second from the event thread — mpv has no change notification for
+    /// demuxer-cache-state that wouldn't fire several times a second while buffering.
+    public event Action? BufferedRangesChanged;
+
+    /// Seconds-from-start spans mpv's demuxer currently holds and could seek within without
+    /// re-fetching, as of the latest BufferedRangesChanged. Empty before the first read. UI thread only.
+    public IReadOnlyList<(double Start, double End)> BufferedRanges { get; private set; } = [];
+
+    /// Stream-cache sizing, applied by CreateMpv: set before the first Load (the options are read
+    /// once, when mpv is created). Defaults match PlayerSettingsStore's, which is where PlayerPage
+    /// gets the real values from (settings.json); these only apply to a host built without them.
+    public int CacheReadaheadSeconds { get; set; } = 600;
+    public int CacheForwardMegabytes { get; set; } = 700;
+    public int CacheBackMegabytes { get; set; } = 300;
+
     public double Position { get; private set; }
     public double Duration { get; private set; }
     public bool IsPaused { get; private set; }
@@ -104,6 +120,12 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     private double volume = 1.0, speed = 1.0;
     private bool subtitleVisible = true;
     private bool eofReached; // edge-detects eof-reached false->true; event thread only
+
+    // Buffered-range polling, event thread only: when it last ran, and what it last posted (the
+    // suppression baseline, so an unchanged cache raises nothing).
+    private long rangesPolledAt = long.MinValue;
+    private (double Start, double End)[] lastRanges = [];
+    private const long RangesPollIntervalMs = 1000;
 
     // Load->FileLoaded timing, logged on open so the stall-timer window can be tuned from real
     // data instead of a guess; reset on every DoLoad, read from the event thread only.
@@ -306,6 +328,18 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         // watchdog, instead of the watchdog being the only thing that ever notices.
         MpvNative.SetOption(mpv, "network-timeout", "20");
         MpvNative.SetOption(mpv, "terminal", "no");
+        // Aggressive stream cache: buffer far past the playhead so a flaky connection stalls late,
+        // and keep a back-buffer so a rewind inside it is free. Sizes come from the host's Cache*
+        // properties (settings.json via PlayerPage). Size options take mpv's "<n>MiB" string form;
+        // mpv_set_option_string failures are not checked (same as every option above), so a value
+        // mpv rejects leaves its own default in force rather than failing the start.
+        MpvNative.SetOption(mpv, "cache", "yes");
+        MpvNative.SetOption(mpv, "demuxer-readahead-secs",
+            CacheReadaheadSeconds.ToString(CultureInfo.InvariantCulture));
+        MpvNative.SetOption(mpv, "demuxer-max-bytes",
+            FormattableString.Invariant($"{CacheForwardMegabytes}MiB"));
+        MpvNative.SetOption(mpv, "demuxer-max-back-bytes",
+            FormattableString.Invariant($"{CacheBackMegabytes}MiB"));
         Com.Check(MpvNative.mpv_initialize(mpv), "mpv_initialize");
         MpvNative.SetPropertyDouble(mpv, "volume", volume * 100);
         MpvNative.SetPropertyDouble(mpv, "speed", speed);
@@ -402,6 +436,9 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         {
             while (!disposed)
             {
+                // Before the wait, so steady property traffic (time-pos ticks) can't starve it;
+                // mpv_wait_event's 1 s timeout is the fallback clock when nothing arrives (paused).
+                PollBufferedRanges();
                 var evPtr = MpvNative.mpv_wait_event(mpv, 1.0);
                 var ev = Marshal.PtrToStructure<MpvNative.Event>(evPtr);
                 switch (ev.Id)
@@ -460,6 +497,56 @@ public sealed class MpvPlayerHost : Grid, IDisposable
             return ([], null);
         }
         return (tracks, selectedId);
+    }
+
+    /// At most once per RangesPollIntervalMs: reads demuxer-cache-state's seekable ranges and posts
+    /// only when they differ from the last post. Event thread only. Nothing else in this class has
+    /// to wake for it — the loop already spins at least once a second.
+    private void PollBufferedRanges()
+    {
+        var now = Environment.TickCount64;
+        if (now - rangesPolledAt < RangesPollIntervalMs) return;
+        rangesPolledAt = now;
+
+        var ranges = ReadBufferedRanges();
+        if (ranges.AsSpan().SequenceEqual(lastRanges)) return;
+        lastRanges = ranges;
+        Post(() =>
+        {
+            BufferedRanges = ranges;
+            BufferedRangesChanged?.Invoke();
+        });
+    }
+
+    /// Reads demuxer-cache-state/seekable-ranges/N/start|end through mpv's string sub-properties,
+    /// the same technique as ReadAudioTracks. mpv exposes no element count for this node array via
+    /// a sub-property that I could verify without a running mpv, so this walks N upward until a read
+    /// fails (no cache yet, no such index, no file) — capped so a misbehaving build can't spin. The
+    /// reads are not atomic across N, which is fine: a range momentarily skewed by a concurrent
+    /// cache update is redrawn a second later. Any failure yields "no ranges", never an end to the
+    /// event loop.
+    private (double Start, double End)[] ReadBufferedRanges()
+    {
+        const int maxRanges = 64;
+        try
+        {
+            List<(double, double)>? ranges = null;
+            for (var i = 0; i < maxRanges; i++)
+            {
+                var prefix = FormattableString.Invariant($"demuxer-cache-state/seekable-ranges/{i}/");
+                if (!double.TryParse(MpvNative.GetPropertyString(mpv, prefix + "start"), NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out var start)) break;
+                if (!double.TryParse(MpvNative.GetPropertyString(mpv, prefix + "end"), NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out var end)) break;
+                if (end > start) (ranges ??= []).Add((start, end));
+            }
+            return ranges?.ToArray() ?? [];
+        }
+        catch (Exception ex)
+        {
+            Log($"buffered-range read failed: {ex.Message}");
+            return [];
+        }
     }
 
     private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;

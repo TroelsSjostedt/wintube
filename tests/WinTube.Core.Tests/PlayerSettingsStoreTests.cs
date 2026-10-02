@@ -179,4 +179,90 @@ public class PlayerSettingsStoreTests : IDisposable
         store.SaveSubtitleLanguage("de");
         Assert.Equal("de", store.LoadSubtitleLanguage());
     }
+
+    // Cache tuning keys are hand-edited only (no savers), so every case writes the file directly.
+    private static string WriteSettings(string json)
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "settings.json"), json);
+        return dir;
+    }
+
+    [Fact]
+    public void CacheTuning_DefaultsWhenAbsent()
+    {
+        var store = new PlayerSettingsStore(directory); // no file at all
+        Assert.Equal(600, store.CacheReadaheadSeconds());
+        Assert.Equal(700, store.CacheForwardMegabytes());
+        Assert.Equal(300, store.CacheBackMegabytes());
+    }
+
+    [Fact]
+    public void CacheTuning_ReadsHandWrittenValues()
+    {
+        var store = new PlayerSettingsStore(WriteSettings(
+            """{"cacheReadaheadSecs":1200,"cacheForwardMb":1024,"cacheBackMb":0}"""));
+        Assert.Equal(1200, store.CacheReadaheadSeconds());
+        Assert.Equal(1024, store.CacheForwardMegabytes());
+        Assert.Equal(0, store.CacheBackMegabytes());
+    }
+
+    [Fact]
+    public void CacheTuning_WrongTypedValues_FallBackToDefaults()
+    {
+        var store = new PlayerSettingsStore(WriteSettings(
+            """{"cacheReadaheadSecs":"lots","cacheForwardMb":{},"cacheBackMb":[1]}"""));
+        Assert.Equal(600, store.CacheReadaheadSeconds());
+        Assert.Equal(700, store.CacheForwardMegabytes());
+        Assert.Equal(300, store.CacheBackMegabytes());
+    }
+
+    [Fact]
+    public void CacheTuning_FractionalValue_FallsBackToDefault()
+    {
+        // 1.5 is not an int; guessing a rounding would hide a typo.
+        Assert.Equal(600, new PlayerSettingsStore(WriteSettings("""{"cacheReadaheadSecs":1.5}""")).CacheReadaheadSeconds());
+    }
+
+    [Fact]
+    public void CacheTuning_TooSmallValues_ClampToFloors()
+    {
+        var store = new PlayerSettingsStore(WriteSettings(
+            """{"cacheReadaheadSecs":1,"cacheForwardMb":-5,"cacheBackMb":-1}"""));
+        Assert.Equal(10, store.CacheReadaheadSeconds());
+        Assert.Equal(50, store.CacheForwardMegabytes());
+        Assert.Equal(0, store.CacheBackMegabytes());
+    }
+
+    [Fact]
+    public void CacheTuning_AbsurdlyLargeValues_ClampToCeilings()
+    {
+        // A hand-edit like 99999999 must not reach mpv, which would reject it and silently keep its default.
+        var store = new PlayerSettingsStore(WriteSettings(
+            """{"cacheReadaheadSecs":99999999,"cacheForwardMb":99999999,"cacheBackMb":99999999}"""));
+        Assert.Equal(86400, store.CacheReadaheadSeconds());
+        Assert.Equal(8192, store.CacheForwardMegabytes());
+        Assert.Equal(8192, store.CacheBackMegabytes());
+    }
+
+    [Theory]
+    [InlineData("{not json")]
+    [InlineData("[1,2,3]")]
+    [InlineData("""{"cacheForwardMb":1,"cacheForwardMb":2}""")]
+    [InlineData("""{"cacheBackMb":"\ud800"}""")] // JSON-escaped lone surrogate, as in the existing suites
+    public void CacheTuning_HostileFiles_DoNotThrow_AndGiveDefaults(string json)
+    {
+        var store = new PlayerSettingsStore(WriteSettings(json));
+        Assert.Equal(600, store.CacheReadaheadSeconds());
+        Assert.Equal(700, store.CacheForwardMegabytes());
+        Assert.Equal(300, store.CacheBackMegabytes());
+    }
+
+    [Fact]
+    public void CacheTuning_SurvivesAVolumeSave()
+    {
+        var store = new PlayerSettingsStore(WriteSettings("""{"cacheForwardMb":900}"""));
+        store.SaveVolume(0.5);
+        Assert.Equal(900, store.CacheForwardMegabytes());
+    }
 }

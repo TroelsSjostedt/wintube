@@ -92,4 +92,27 @@ public sealed class PlayerSettingsStore(string dataDirectory)
         }
         Save(settings);
     }
+
+    // Stream-cache tuning. Read-only, edited by hand in settings.json (like the secrets overrides) —
+    // no savers, so nothing in the app ever rewrites them. Defaults are sized for a long adaptive
+    // video: ten minutes of lookahead, ~700 MB forward and ~300 MB of back-buffer for rewinds.
+
+    /// Seconds of lookahead mpv's demuxer may buffer (`cacheReadaheadSecs`, default 600, 10..86400).
+    public int CacheReadaheadSeconds() => ReadInt("cacheReadaheadSecs", 600, min: 10, max: 86400);
+
+    /// Megabytes the demuxer may hold ahead of the playhead (`cacheForwardMb`, default 700, 50..8192).
+    public int CacheForwardMegabytes() => ReadInt("cacheForwardMb", 700, min: 50, max: 8192);
+
+    /// Megabytes the demuxer keeps behind the playhead for cheap rewinds (`cacheBackMb`, default 300, 0..8192).
+    public int CacheBackMegabytes() => ReadInt("cacheBackMb", 300, min: 0, max: 8192);
+
+    /// A whole-number setting clamped to [min, max]. The ceiling is not a taste call: mpv rejects an
+    /// out-of-range value and the caller would silently be left on mpv's own default, so a hand-edit
+    /// typo like 99999999 is pulled back to something mpv accepts instead. Absent, wrong-typed or
+    /// fractional values give the default.
+    private int ReadInt(string key, int fallback, int min, int max)
+    {
+        if (Load()[key] is JsonValue v && v.TryGetValue(out int n)) return Math.Clamp(n, min, max);
+        return fallback;
+    }
 }
