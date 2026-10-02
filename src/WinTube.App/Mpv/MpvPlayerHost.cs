@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using WinTube.Core.Player;
 
 namespace WinTube.App.Mpv;
 
@@ -126,6 +127,9 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     private long rangesPolledAt = long.MinValue;
     private (double Start, double End)[] lastRanges = [];
     private const long RangesPollIntervalMs = 1000;
+    // One cache-state diagnostic line per host. Armed by the first FileLoaded: before a file is
+    // open the property legitimately has no answer, which would read as "unavailable".
+    private bool logCacheState, cacheStateLogged;
 
     // Load->FileLoaded timing, logged on open so the stall-timer window can be tuned from real
     // data instead of a guess; reset on every DoLoad, read from the event thread only.
@@ -446,6 +450,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
                     case MpvNative.EventId.None: continue;
                     case MpvNative.EventId.Shutdown: return;
                     case MpvNative.EventId.FileLoaded:
+                        logCacheState = true;
                         Log(FormattableString.Invariant($"open: {(DateTimeOffset.UtcNow - loadStartedAt).TotalSeconds:F1}s {loadKind}"));
                         Post(() => Opened?.Invoke());
                         var (audioTracks, selectedAudioId) = ReadAudioTracks();
@@ -518,29 +523,25 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         });
     }
 
-    /// Reads demuxer-cache-state/seekable-ranges/N/start|end through mpv's string sub-properties,
-    /// the same technique as ReadAudioTracks. mpv exposes no element count for this node array via
-    /// a sub-property that I could verify without a running mpv, so this walks N upward until a read
-    /// fails (no cache yet, no such index, no file) — capped so a misbehaving build can't spin. The
-    /// reads are not atomic across N, which is fine: a range momentarily skewed by a concurrent
-    /// cache update is redrawn a second later. Any failure yields "no ranges", never an end to the
+    /// Reads demuxer-cache-state as one string — mpv hands a node-valued property back as its full
+    /// JSON form — and lets DemuxerCacheState pick the seekable ranges out of it. (The indexed
+    /// sub-property route, demuxer-cache-state/seekable-ranges/N/start, does not answer.) The first
+    /// read after the first FileLoaded logs once whether the property answered at all, which is the
+    /// live confirmation that this path works. Any failure yields "no ranges", never an end to the
     /// event loop.
     private (double Start, double End)[] ReadBufferedRanges()
     {
-        const int maxRanges = 64;
         try
         {
-            List<(double, double)>? ranges = null;
-            for (var i = 0; i < maxRanges; i++)
+            var json = MpvNative.GetPropertyString(mpv, "demuxer-cache-state");
+            var ranges = DemuxerCacheState.ParseRanges(json).ToArray();
+            if (logCacheState && !cacheStateLogged)
             {
-                var prefix = FormattableString.Invariant($"demuxer-cache-state/seekable-ranges/{i}/");
-                if (!double.TryParse(MpvNative.GetPropertyString(mpv, prefix + "start"), NumberStyles.Float,
-                        CultureInfo.InvariantCulture, out var start)) break;
-                if (!double.TryParse(MpvNative.GetPropertyString(mpv, prefix + "end"), NumberStyles.Float,
-                        CultureInfo.InvariantCulture, out var end)) break;
-                if (end > start) (ranges ??= []).Add((start, end));
+                cacheStateLogged = true;
+                Log(json is null ? "cache-state: unavailable"
+                    : FormattableString.Invariant($"cache-state: {ranges.Length} ranges"));
             }
-            return ranges?.ToArray() ?? [];
+            return ranges;
         }
         catch (Exception ex)
         {
