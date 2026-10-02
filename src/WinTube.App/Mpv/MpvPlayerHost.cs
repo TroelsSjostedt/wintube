@@ -124,7 +124,9 @@ public sealed class MpvPlayerHost : Grid, IDisposable
 
     // Buffered-range polling, event thread only: when it last ran, and what it last posted (the
     // suppression baseline, so an unchanged cache raises nothing).
-    private long rangesPolledAt = long.MinValue;
+    // 0, not long.MinValue: TickCount64 minus MinValue overflows negative, which would make the
+    // interval gate read "too soon" forever and silence the poll entirely.
+    private long rangesPolledAt;
     private (double Start, double End)[] lastRanges = [];
     private const long RangesPollIntervalMs = 1000;
     // One cache-state diagnostic line per host. Armed by the first FileLoaded: before a file is
