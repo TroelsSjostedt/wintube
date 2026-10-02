@@ -116,7 +116,7 @@ public sealed partial class PlayerPage : Page
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush SponsorMarkerBrush =
         new(Windows.UI.Color.FromArgb(179, 0xE6, 0xC2, 0x1F));   // ~70% opacity caution yellow
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush BufferedRangeBrush =
-        new(Windows.UI.Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF));  // ~40% white: a light-grey wash over the track
+        new(Windows.UI.Color.FromArgb(0xCC, 0x4C, 0xAF, 0x50));  // green, clearly distinct from track and markers
     /// Cached result of GetThumbInset() — set once the live Thumb part has a real ActualWidth.
     private double? thumbInset;
 
