@@ -30,7 +30,7 @@ public sealed class FeedService(InnerTubeClient innerTube)
     /// the first carries a header, so the untitled chunks are folded back into their row and
     /// the row is retitled to name the feed.
     public Task<FeedPage> LoadHistoryFeedAsync(string accessToken, CancellationToken ct = default) =>
-        LoadSupplementaryAsync("FEhistory", "Continue watching", accessToken, ct);
+        LoadSupplementaryAsync("FEhistory", "History", accessToken, ct);
 
     /// The account's subscriptions feed — same pre-chunked shape as History.
     public Task<FeedPage> LoadSubscriptionsFeedAsync(string accessToken, CancellationToken ct = default) =>

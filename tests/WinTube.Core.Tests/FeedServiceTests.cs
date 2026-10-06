@@ -130,7 +130,7 @@ public class FeedServiceTests
         Assert.Equal(2, page.Sections.Count);
         Assert.True(page.Sections[0].IsShorts);
         Assert.Equal("Shorts", page.Sections[0].Title);             // NOT retitled
-        Assert.Equal("Continue watching", page.Sections[1].Title);  // first non-Shorts row
+        Assert.Equal("History", page.Sections[1].Title);  // first non-Shorts row
         Assert.Equal(["v1", "v2"], page.Sections[1].Items.Select(i => i.Id));
     }
 
@@ -192,7 +192,7 @@ public class FeedServiceTests
         var (feed, _) = Make(json);
         var page = await feed.LoadHistoryFeedAsync("T");
         var section = Assert.Single(page.Sections);
-        Assert.Equal("Continue watching", section.Title);
+        Assert.Equal("History", section.Title);
         Assert.Equal(["v1", "v2"], section.Items.Select(i => i.Id));   // deduped fold
         Assert.Equal("CHUNK_TOKEN", section.Continuation);             // chunk token outranks host's
     }
@@ -284,7 +284,7 @@ public class FeedServiceTests
         });
         var page = await feed.LoadCompositeHomeAsync("T");
         Assert.Equal(
-            ["Recommended", "From your subscriptions", "New to you", "Continue watching"],
+            ["Recommended", "From your subscriptions", "New to you", "History"],
             page.Sections.Select(s => s.Title));
         Assert.Equal(1, page.HistoryRowCount);
     }
@@ -343,7 +343,7 @@ public class FeedServiceTests
         var local = new FeedSection("local", "Continue watching", [new VideoItem { Id = "c1", Title = "c1" }], null, false);
         var page = await feed.LoadCompositeHomeAsync("T", local);
         Assert.Equal(
-            ["Shorts", "Recommended", "Continue watching", "From your subscriptions", "New to you", "Continue watching"],
+            ["Shorts", "Recommended", "Continue watching", "From your subscriptions", "New to you", "History"],
             page.Sections.Select(s => s.Title));
         Assert.Equal("local", page.Sections[2].Id);
         Assert.Equal(1, page.HistoryRowCount);   // the local row is not a history row
