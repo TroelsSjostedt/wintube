@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using System.Collections.ObjectModel;
 using WinTube.Core.Models;
+using WinTube.Core.Stores;
 
 namespace WinTube.App.Views;
 
@@ -43,7 +44,8 @@ public sealed partial class HomePage : Page
         ErrorBar.IsOpen = false;
         try
         {
-            var page = await App.Session.RunAsync(t => App.Session.Feed.LoadCompositeHomeAsync(t));
+            var localRow = ContinueWatchingRow();
+            var page = await App.Session.RunAsync(t => App.Session.Feed.LoadCompositeHomeAsync(t, localRow));
             shelves.Clear();
             foreach (var section in page.Sections) shelves.Add(new ShelfViewModel(section));
             historyRowCount = page.HistoryRowCount;
@@ -55,6 +57,22 @@ public sealed partial class HomePage : Page
         catch (Exception ex)
         {
             ShowError(ex.Message, LoadHomeAsync);
+        }
+    }
+
+    /// The locally-built "Continue watching" row, read on the UI thread before the network
+    /// fetch. Cards get their progress line from RefreshAllProgress like every other row.
+    /// Best-effort: a store hiccup leaves the row out rather than failing Home.
+    private static FeedSection? ContinueWatchingRow()
+    {
+        try
+        {
+            return ContinueWatchingBuilder.Row(
+                App.Session.History.WatchedHere, App.Session.Progress.Entries, App.Session.History.Card);
+        }
+        catch
+        {
+            return null;
         }
     }
 

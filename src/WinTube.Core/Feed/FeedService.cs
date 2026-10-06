@@ -86,8 +86,10 @@ public sealed class FeedService(InnerTubeClient innerTube)
 
     /// The tvOS Home collage: three feeds fetched in parallel, interleaved by a fixed rule.
     /// A failed supplementary feed just leaves its rows out; only the Home fetch throws.
+    /// `localRow`, when given, is a row the caller built from on-device state; it lands right
+    /// after Home's lead (directly below "Recommended"), ahead of the subscriptions rows.
     public async Task<CompositeHomePage> LoadCompositeHomeAsync(
-        string accessToken, CancellationToken ct = default)
+        string accessToken, FeedSection? localRow = null, CancellationToken ct = default)
     {
         var homeTask = LoadHomeAsync(accessToken, ct);
         var subscriptionsTask = Quietly(LoadSubscriptionsFeedAsync(accessToken, ct));
@@ -103,6 +105,7 @@ public sealed class FeedService(InnerTubeClient innerTube)
 
         var composed = new List<(FeedSection Section, bool IsHistory)>();
         composed.AddRange(home.Sections.Take(leadCount).Select(s => (s, false)));
+        if (localRow is not null) composed.Add((localRow, false));
         if (subscriptions is not null)
             composed.AddRange(subscriptions.Sections.Select(s => (s, false)));
         composed.AddRange(home.Sections.Skip(leadCount).Select(s => (s, false)));

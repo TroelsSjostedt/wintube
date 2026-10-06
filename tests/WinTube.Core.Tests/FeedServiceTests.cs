@@ -2,6 +2,7 @@ using WinTube.Core;
 using WinTube.Core.Feed;
 using WinTube.Core.InnerTube;
 using WinTube.Core.Search;
+using WinTube.Core.Models;
 
 namespace WinTube.Core.Tests;
 
@@ -326,5 +327,25 @@ public class FeedServiceTests
         Assert.Equal(["Shorts", "Recommended", "From your subscriptions"],
             page.Sections.Select(s => s.Title));
         Assert.Equal(["s1", "s2"], page.Sections[0].Items.Select(i => i.Id));
+    }
+
+    [Fact]
+    public async Task CompositeHome_LocalRowSitsRightAfterTheFirstNonShortsRow()
+    {
+        var feed = MakeRouted(new()
+        {
+            ["default"] = SectionList(
+                "{\"reelShelfRenderer\":{\"items\":[" + ShortTile("s1") + "]}}",
+                Shelf("Recommended", Tile("h1")), Shelf("New to you", Tile("h2"))),
+            ["FEsubscriptions"] = SectionList(Shelf("Today", Tile("s9"))),
+            ["FEhistory"] = SectionList(Shelf("x", Tile("w1"))),
+        });
+        var local = new FeedSection("local", "Continue watching", [new VideoItem { Id = "c1", Title = "c1" }], null, false);
+        var page = await feed.LoadCompositeHomeAsync("T", local);
+        Assert.Equal(
+            ["Shorts", "Recommended", "Continue watching", "From your subscriptions", "New to you", "Continue watching"],
+            page.Sections.Select(s => s.Title));
+        Assert.Equal("local", page.Sections[2].Id);
+        Assert.Equal(1, page.HistoryRowCount);   // the local row is not a history row
     }
 }
