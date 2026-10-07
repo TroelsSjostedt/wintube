@@ -10,8 +10,9 @@ using WinTube.Core.Models;
 namespace WinTube.App.Controls;
 
 /// The portrait Shorts tile: a 150x267 thumbnail with an optional bottom-right channel
-/// avatar. No title, stats, duration, or progress line - Shorts rows are just a scrollable
-/// wall of thumbnails. Stateless beyond its Video dependency property, same as VideoCard.
+/// avatar and the title overlaid on a bottom scrim. The title fades out while the card is
+/// preview-warm (hover/focus) so the preview plays unobstructed. No stats, duration, or progress
+/// line. Stateless beyond its Video dependency property, same as VideoCard.
 public sealed partial class ShortCard : UserControl, IPreviewHost
 {
     private static readonly Brush IdleEdge = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -41,6 +42,10 @@ public sealed partial class ShortCard : UserControl, IPreviewHost
         // PointerExited/Unloaded first) — cold the OLD identity before the new one takes over,
         // or the coordinator's hosts/gate stay stuck on an id this card can no longer report.
         App.Previews.Detach(this);
+        // A recycled card may still be faded out from the old identity's hover; clear the stale
+        // title and restore the scrim so the new identity starts with its title showing.
+        TitleText.Text = Video?.Title ?? "";
+        SetTitleVisible(true);
         if (Video is not { } video) return;
 
         ThumbnailBrush.ImageSource = new BitmapImage(
@@ -56,17 +61,26 @@ public sealed partial class ShortCard : UserControl, IPreviewHost
             AvatarBrush.ImageSource = null;
             Avatar.Visibility = Visibility.Collapsed;
         }
+
+        // Keep the title clear of the avatar (24 wide + 6 margin) when there is one.
+        TitleOverlay.Padding = new Thickness(8, 0, video.ChannelAvatarUrl is null ? 8 : 36, 8);
     }
+
+    /// Fades the title scrim (ScalarTransition on its Opacity). Hidden exactly while the card is
+    /// preview-warm: every Warm site hides it, every Cold/Detach site restores it.
+    private void SetTitleVisible(bool visible) => TitleOverlay.Opacity = visible ? 1 : 0;
 
     private void OnPointerEntered(object sender, PointerRoutedEventArgs e)
     {
         HoverEdge.BorderBrush = HoverEdgeBrush;
+        SetTitleVisible(false);
         App.Previews.Warm(this);
     }
 
     private void OnPointerExited(object sender, PointerRoutedEventArgs e)
     {
         HoverEdge.BorderBrush = IdleEdge;
+        SetTitleVisible(true);
         App.Previews.Cold(this);
     }
 
@@ -142,11 +156,20 @@ public sealed partial class ShortCard : UserControl, IPreviewHost
         }
         selectorItem = null;
         App.Previews.Detach(this);
+        SetTitleVisible(true);
     }
 
-    private void OnSelectorItemGotFocus(object sender, RoutedEventArgs e) => App.Previews.Warm(this);
+    private void OnSelectorItemGotFocus(object sender, RoutedEventArgs e)
+    {
+        SetTitleVisible(false);
+        App.Previews.Warm(this);
+    }
 
-    private void OnSelectorItemLostFocus(object sender, RoutedEventArgs e) => App.Previews.Cold(this);
+    private void OnSelectorItemLostFocus(object sender, RoutedEventArgs e)
+    {
+        SetTitleVisible(true);
+        App.Previews.Cold(this);
+    }
 
     /// GridView (SearchPage/HistoryPage) hosts cards in GridViewItem, ListView in ListViewItem —
     /// both derive from SelectorItem, so matching that base is what makes keyboard focus wire up

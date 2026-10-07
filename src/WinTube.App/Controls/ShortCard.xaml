@@ -17,6 +17,21 @@
                 <MediaPlayerElement.OpacityTransition><ScalarTransition Duration="0:0:0.2"/></MediaPlayerElement.OpacityTransition>
             </MediaPlayerElement>
         </Border>
+        <!-- Title over a bottom scrim. Sits under the avatar so the avatar stays put when the title
+             fades out for the hover/focus preview; IsHitTestVisible=False so it never eats a tap. -->
+        <Border x:Name="TitleOverlay" Height="107" VerticalAlignment="Bottom"
+                CornerRadius="0,0,8,8" Padding="8,0,8,8" IsHitTestVisible="False">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop Color="#00000000" Offset="0"/>
+                    <GradientStop Color="#CC000000" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            <Border.OpacityTransition><ScalarTransition Duration="0:0:0.2"/></Border.OpacityTransition>
+            <TextBlock x:Name="TitleText" VerticalAlignment="Bottom"
+                       Foreground="White" FontSize="13" FontWeight="SemiBold"
+                       TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"/>
+        </Border>
         <Ellipse x:Name="Avatar" Width="24" Height="24" Margin="0,0,6,6"
                  HorizontalAlignment="Right" VerticalAlignment="Bottom"
                  Visibility="Collapsed">
