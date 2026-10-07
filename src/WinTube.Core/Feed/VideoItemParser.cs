@@ -77,7 +77,10 @@ public static class VideoItemParser
         {
             Id = videoId,
             Title = Json.InnerTubeText(
-                Json.ValueAt(tile, "metadata/tileMetadataRenderer/title")) ?? "",
+                Json.ValueAt(tile, "metadata/tileMetadataRenderer/title"))
+                ?? TileOverlayTitle(tile)
+                ?? Json.InnerTubeText(
+                    Json.ValueAt(tile, "onLongPressCommand/showMenuCommand/title")) ?? "",
             Author = subtitle.Author,
             ChannelId = ChannelId(tile),
             ThumbnailUrl = LargestThumbnailUrl(thumbnails) ?? VideoItem.FallbackThumbnail(videoId),
@@ -87,6 +90,20 @@ public static class VideoItemParser
             Duration = DurationOverlay(tile),
             IsShort = IsShortCell(tile, thumbnails),
         };
+    }
+
+    /// Shorts tiles in the TV feed carry no `metadata` at all: the title rides as a
+    /// tileMetadataRenderer among the header's thumbnail overlays (the long-press menu
+    /// repeats it, which is the next fallback).
+    private static string? TileOverlayTitle(JsonElement tile)
+    {
+        if (Json.ValueAt(tile, "header/tileHeaderRenderer/thumbnailOverlays") is
+            { ValueKind: JsonValueKind.Array } overlays)
+            foreach (var overlay in overlays.EnumerateArray())
+                if (Json.InnerTubeText(Json.ValueAt(overlay, "tileMetadataRenderer/title"))
+                    is { } title)
+                    return title;
+        return null;
     }
 
     // MARK: lockupViewModel (the view-model cell search returns most hits in)

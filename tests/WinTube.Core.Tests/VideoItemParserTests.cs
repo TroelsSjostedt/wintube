@@ -43,6 +43,57 @@ public class VideoItemParserTests
         Assert.False(item.IsShort);
     }
 
+    // Modeled on the live TV home feed: a Shorts tile has no metadata renderer at all. The
+    // title rides as a tileMetadataRenderer inside the header's thumbnailOverlays, and again
+    // on the long-press menu command.
+    [Fact]
+    public void ShortsTile_TitleComesFromHeaderOverlay_WhenMetadataIsAbsent()
+    {
+        var item = Assert.Single(Parse("""
+            {"tileRenderer":{
+              "style":"TILE_STYLE_YTLR_SHORTS",
+              "contentType":"TILE_CONTENT_TYPE_SHORTS",
+              "onSelectCommand":{"reelWatchEndpoint":{"videoId":"short1"}},
+              "header":{"tileHeaderRenderer":{
+                "thumbnail":{"thumbnails":[
+                  {"url":"https://i.ytimg.com/s.jpg","width":405,"height":720}]},
+                "thumbnailOverlays":[{"tileMetadataRenderer":{
+                  "title":{"simpleText":"Eggshell Magic"}}}]}},
+              "onLongPressCommand":{"showMenuCommand":{
+                "title":{"simpleText":"Eggshell Magic"},
+                "subtitle":{"simpleText":"Vsauce • @Vsauce"}}}}}
+            """));
+        Assert.Equal("Eggshell Magic", item.Title);
+        Assert.True(item.IsShort);
+    }
+
+    [Fact]
+    public void ShortsTile_TitleFallsBackToLongPressMenu_WhenOverlayHasNone()
+    {
+        var item = Assert.Single(Parse("""
+            {"tileRenderer":{
+              "contentType":"TILE_CONTENT_TYPE_SHORTS",
+              "onSelectCommand":{"reelWatchEndpoint":{"videoId":"short2"}},
+              "header":{"tileHeaderRenderer":{"thumbnailOverlays":[]}},
+              "onLongPressCommand":{"showMenuCommand":{
+                "title":{"simpleText":"Gravity"}}}}}
+            """));
+        Assert.Equal("Gravity", item.Title);
+    }
+
+    [Fact]
+    public void Tile_MetadataTitleWinsOverFallbacks()
+    {
+        var item = Assert.Single(Parse("""
+            {"tileRenderer":{
+              "onSelectCommand":{"reelWatchEndpoint":{"videoId":"short3"}},
+              "header":{"tileHeaderRenderer":{"thumbnailOverlays":[{"tileMetadataRenderer":{
+                "title":{"simpleText":"Overlay"}}}]}},
+              "metadata":{"tileMetadataRenderer":{"title":{"simpleText":"Primary"}}}}}
+            """));
+        Assert.Equal("Primary", item.Title);
+    }
+
     [Fact]
     public void Tile_ChannelContentType_IsSkipped()
     {
