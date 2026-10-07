@@ -37,6 +37,9 @@
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                PointerEntered="OnVersionEntered" PointerExited="OnVersionExited"
                                Tapped="OnVersionTapped"/>
+                    <TextBlock x:Name="UpdateStatus" Margin="16,0,4,8" FontSize="12"
+                               TextWrapping="Wrap" Visibility="Collapsed"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                 </StackPanel>
             </NavigationView.PaneFooter>
             <Frame x:Name="RootFrame"/>

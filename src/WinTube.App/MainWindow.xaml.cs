@@ -72,11 +72,32 @@ public sealed partial class MainWindow : Window
     /// there's nothing to await or report on here.
     private async void CheckForUpdatesAsync()
     {
-        var version = await updates.CheckAsync();
-        if (version is null) return;
+        var version = await updates.CheckAsync(OnUpdateProgress);
+        updateDownloadDone = true;
+        if (version is null)
+        {
+            // A failed download after a progress tick must not leave a stale "downloading" line.
+            UpdateStatus.Visibility = Visibility.Collapsed;
+            return;
+        }
+        UpdateStatus.Text = $"New version {version} ready";
+        UpdateStatus.Visibility = Visibility.Visible;
         UpdateBar.Message = $"Update ready — restart for v{version}";
         UpdateBar.IsOpen = true;
     }
+
+    /// Set once CheckAsync returns (UI thread), so a progress tick still queued from Velopack's
+    /// background thread can't overwrite the final footer text.
+    private bool updateDownloadDone;
+
+    /// Velopack's progress callback fires on a background thread, so hop to the UI thread.
+    private void OnUpdateProgress(string version, int percent) =>
+        dispatcher.TryEnqueue(() =>
+        {
+            if (updateDownloadDone) return;
+            UpdateStatus.Text = $"New version {version} found - downloading {percent}%";
+            UpdateStatus.Visibility = Visibility.Visible;
+        });
 
     private void OnRestartForUpdate(object sender, RoutedEventArgs e) => updates.ApplyAndRestart();
 

@@ -13,8 +13,11 @@ public sealed class UpdateService
     private UpdateManager? manager;
     private UpdateInfo? pending;
 
-    /// Checks and silently downloads. Returns the version string ready to apply, or null.
-    public async Task<string?> CheckAsync()
+    /// Checks and downloads. Returns the version string ready to apply, or null. `progress`
+    /// gets (target version, percent) once the download starts (0) and then on each whole-percent
+    /// change; Velopack fires its callback often and from a background thread, so the callback
+    /// here runs off the UI thread and the caller must marshal.
+    public async Task<string?> CheckAsync(Action<string, int>? progress = null)
     {
         try
         {
@@ -22,8 +25,18 @@ public sealed class UpdateService
             if (!manager.IsInstalled) return null;
             pending = await manager.CheckForUpdatesAsync();
             if (pending is null) return null;
-            await manager.DownloadUpdatesAsync(pending);
-            return pending.TargetFullRelease.Version.ToString();
+            var version = pending.TargetFullRelease.Version.ToString();
+            var lastPercent = -1;
+            void Report(int percent)
+            {
+                percent = Math.Clamp(percent, 0, 100);
+                if (percent == lastPercent) return;
+                lastPercent = percent;
+                progress?.Invoke(version, percent);
+            }
+            Report(0);
+            await manager.DownloadUpdatesAsync(pending, Report);
+            return version;
         }
         catch (Exception e)
         {
