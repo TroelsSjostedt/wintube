@@ -112,7 +112,24 @@ public static partial class HlsVariantParser
     /// available quality if all exceed it. Returns null only for an empty quality list.
     /// Expects the list to be ordered tallest-first, as QualityLevels returns it.
     public static HlsQuality? AutoQuality(IReadOnlyList<HlsQuality> qualities, int maxHeight) =>
-        qualities.FirstOrDefault(q => q.Height <= maxHeight) ?? qualities.LastOrDefault();
+        AutoQuality(qualities, maxHeight, rateBytesPerSecond: null);
+
+    /// Selects the highest quality whose height does not exceed maxHeight AND whose BANDWIDTH
+    /// fits the measured download rate, or the lowest available quality if none fits both.
+    /// Units: rateBytesPerSecond is BYTES per second (as the demuxer and smoother report it),
+    /// while HlsQuality.Bandwidth is BITS per second, so the budget is rate × 8 × SafetyFactor.
+    /// A null, zero, negative, NaN or infinite rate is unusable and leaves the pick screen-only.
+    /// Returns null only for an empty quality list. Expects the list to be ordered tallest-first,
+    /// as QualityLevels returns it.
+    public static HlsQuality? AutoQuality(
+        IReadOnlyList<HlsQuality> qualities, int maxHeight, double? rateBytesPerSecond)
+    {
+        var budgetBitsPerSecond = rateBytesPerSecond is { } rate && double.IsFinite(rate) && rate > 0
+            ? rate * 8 * AdaptiveAutoTuning.SafetyFactor
+            : double.PositiveInfinity;
+        return qualities.FirstOrDefault(q => q.Height <= maxHeight && q.Bandwidth <= budgetBitsPerSecond)
+            ?? qualities.LastOrDefault();
+    }
 
     /// True only when the single surviving STREAM-INF pair's URI line (the very next line, as
     /// FilterToBandwidth writes it) parses as an absolute https URL. Cheap hardening against a

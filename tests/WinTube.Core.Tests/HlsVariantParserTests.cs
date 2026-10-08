@@ -122,4 +122,35 @@ public class HlsVariantParserTests
         Assert.Equal(360, HlsVariantParser.AutoQuality(levels, 240)!.Height);   // everything too tall -> lowest
         Assert.Null(HlsVariantParser.AutoQuality([], 1080));
     }
+
+    [Fact]
+    public void AutoQuality_RateCapsBelowScreenChoice()
+    {
+        var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(Manifest)); // 2160,1080,360
+        // 2 MB/s = 16 Mbit/s; ×0.7 → 11.2 Mbit/s: 2160p (28M) too rich, 1080p (6.3M) fits.
+        Assert.Equal(1080, HlsVariantParser.AutoQuality(levels, 2160, 2_000_000)!.Height);
+        // Plenty of rate → the screen rung wins unchanged.
+        Assert.Equal(2160, HlsVariantParser.AutoQuality(levels, 2160, 100_000_000)!.Height);
+        // The rate can never pull ABOVE the screen cap.
+        Assert.Equal(1080, HlsVariantParser.AutoQuality(levels, 1080, 100_000_000)!.Height);
+    }
+
+    [Fact]
+    public void AutoQuality_StarvedRate_PicksLowestNotNothing()
+    {
+        var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(Manifest));
+        Assert.Equal(360, HlsVariantParser.AutoQuality(levels, 2160, 10_000)!.Height);
+    }
+
+    [Fact]
+    public void AutoQuality_UnusableRate_FallsBackToScreenOnly()
+    {
+        var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(Manifest));
+        Assert.Equal(2160, HlsVariantParser.AutoQuality(levels, 2160, null)!.Height);
+        Assert.Equal(2160, HlsVariantParser.AutoQuality(levels, 2160, 0)!.Height);
+        Assert.Equal(2160, HlsVariantParser.AutoQuality(levels, 2160, double.NaN)!.Height);
+        Assert.Equal(2160, HlsVariantParser.AutoQuality(levels, 2160, -1)!.Height);
+        Assert.Equal(2160, HlsVariantParser.AutoQuality(levels, 2160, double.PositiveInfinity)!.Height);
+        Assert.Null(HlsVariantParser.AutoQuality([], 2160, 5_000_000));
+    }
 }
