@@ -9,7 +9,7 @@ public enum DownshiftDecision
     Downshift,
     /// Enough stalls, but the last downshift was less than CooldownSeconds ago.
     SuppressedCooldown,
-    /// Enough stalls and out of cooldown, but MaxDownshiftsPerVideo downshifts were already granted.
+    /// Enough stalls, but MaxDownshiftsPerVideo downshifts were already granted (reported even during a cooldown).
     SuppressedCap,
 }
 
@@ -42,7 +42,8 @@ public sealed class DownshiftPolicy
     private DateTimeOffset? lastDownshiftAt;
     private int downshifts;
 
-    /// Records one genuine stall at `now` and returns what it means for quality.
+    /// Records one genuine stall at `now` and returns what it means for quality. `now` must be
+    /// non-decreasing across calls; the caller owns clock monotonicity.
     public DownshiftDecision RecordStall(DateTimeOffset now)
     {
         stalls.RemoveAll(s => now - s >= Window);

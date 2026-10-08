@@ -119,7 +119,7 @@ public class DownshiftPolicyTests
     }
 
     [Fact]
-    public void Reset_ClearsCooldownAndDownshiftCount()
+    public void Reset_ClearsDownshiftCount()
     {
         var t0 = DateTimeOffset.UnixEpoch;
         var p = new DownshiftPolicy();
@@ -131,9 +131,25 @@ public class DownshiftPolicyTests
 
         p.Reset();
 
-        // New video: the cap and the cooldown are both gone, so the pattern downshifts again.
+        // New video: the cap is gone, so the pattern downshifts again (200/210 are outside any cooldown).
         Assert.Equal(DownshiftDecision.None, p.RecordStall(t0.AddSeconds(200)));
         Assert.Equal(DownshiftDecision.Downshift, p.RecordStall(t0.AddSeconds(210)));
+    }
+
+    [Fact]
+    public void Reset_ClearsCooldown()
+    {
+        // Downshift at t0+10 starts a cooldown. After Reset, a stall pair at t0+20 and t0+25 sits
+        // inside that old cooldown, so a stale lastDownshiftAt would report SuppressedCooldown.
+        var t0 = DateTimeOffset.UnixEpoch;
+        var p = new DownshiftPolicy();
+        Assert.Equal(DownshiftDecision.None, p.RecordStall(t0));
+        Assert.Equal(DownshiftDecision.Downshift, p.RecordStall(t0.AddSeconds(10)));
+
+        p.Reset();
+
+        Assert.Equal(DownshiftDecision.None, p.RecordStall(t0.AddSeconds(20)));
+        Assert.Equal(DownshiftDecision.Downshift, p.RecordStall(t0.AddSeconds(25)));
     }
 
     [Fact]
