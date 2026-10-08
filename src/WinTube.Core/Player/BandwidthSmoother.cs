@@ -6,7 +6,7 @@ namespace WinTube.Core.Player;
 /// half its weight every RateSmoothingHalfLifeSeconds whatever the poll interval. The first accepted
 /// sample seeds the average directly. A rejected sample leaves the value untouched: a bytes value that
 /// is not a positive finite number is rejected at any time, and once seeded, so is an elapsed value
-/// that is not a positive finite number. Not thread-safe — drive it from the UI thread.
+/// that is not a positive finite number. Single-threaded, not thread-safe.
 public sealed class BandwidthSmoother
 {
     private double? rate;

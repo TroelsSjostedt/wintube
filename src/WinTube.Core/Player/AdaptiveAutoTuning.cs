@@ -7,6 +7,10 @@ public static class AdaptiveAutoTuning
     /// Fraction of the measured download rate a rung's BANDWIDTH may use (rate × 8 × SafetyFactor).
     public const double SafetyFactor = 0.7;
 
+    /// Fraction of the configured forward-cache cap at which the cache counts as full; the download-rate
+    /// estimate ignores readings taken then (a full cache measures consumption, not the line).
+    public const double CacheFullFraction = 0.9;
+
     /// Window in which genuine stalls are counted toward a downshift.
     public const int StallWindowSeconds = 60;
 

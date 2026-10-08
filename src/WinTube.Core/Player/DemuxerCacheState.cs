@@ -16,23 +16,34 @@ public static class DemuxerCacheState
     /// Empty and inverted spans (end <= start) are dropped.
     public static IReadOnlyList<(double Start, double End)> ParseRanges(string? json) => ParseState(json).Ranges;
 
-    /// Both halves of the state: the cached spans (as <see cref="ParseRanges"/>) and mpv's current
-    /// download rate in bytes per second. The rate is null when the key is absent, not a number,
-    /// negative or not finite. Same tolerance as <see cref="ParseRanges"/>: never throws.
-    public static (IReadOnlyList<(double Start, double End)> Ranges, double? RawInputBytesPerSecond) ParseState(string? json)
+    /// The state's parts: the cached spans (as <see cref="ParseRanges"/>), mpv's current download rate
+    /// in bytes per second ("raw-input-rate") and the bytes cached ahead of the playhead ("fw-bytes").
+    /// Each number is null when its key is absent, not a number, negative or not finite. Same tolerance
+    /// as <see cref="ParseRanges"/>: never throws.
+    public static (IReadOnlyList<(double Start, double End)> Ranges, double? RawInputBytesPerSecond, double? ForwardBytes) ParseState(string? json)
     {
-        if (string.IsNullOrWhiteSpace(json)) return ([], null);
+        if (string.IsNullOrWhiteSpace(json)) return ([], null, null);
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object) return ([], null);
-            return (ReadRanges(doc.RootElement), ReadRate(doc.RootElement));
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return ([], null, null);
+            return (ReadRanges(doc.RootElement),
+                ReadNonNegative(doc.RootElement, "raw-input-rate"),
+                ReadNonNegative(doc.RootElement, "fw-bytes"));
         }
         catch (JsonException)
         {
-            return ([], null);
+            return ([], null, null);
         }
     }
+
+    /// True when the forward cache holds at least CacheFullFraction of its configured cap. Once full,
+    /// mpv stops reading ahead and raw-input-rate falls to what playback consumes (the playing rung's
+    /// bitrate), not what the line can carry, so a reading taken then must not feed the bandwidth
+    /// estimate. An unknown fill (null) is never "full".
+    public static bool IsForwardCacheFull(double? forwardBytes, int forwardCacheMegabytes) =>
+        forwardBytes is { } fw &&
+        fw >= AdaptiveAutoTuning.CacheFullFraction * forwardCacheMegabytes * 1024.0 * 1024.0;
 
     private static List<(double Start, double End)> ReadRanges(JsonElement root)
     {
@@ -51,10 +62,10 @@ public static class DemuxerCacheState
         return ranges;
     }
 
-    private static double? ReadRate(JsonElement root)
+    private static double? ReadNonNegative(JsonElement root, string key)
     {
-        if (!root.TryGetProperty("raw-input-rate", out var r) || r.ValueKind != JsonValueKind.Number ||
-            !r.TryGetDouble(out var rate) || !double.IsFinite(rate) || rate < 0) return null;
-        return rate;
+        if (!root.TryGetProperty(key, out var r) || r.ValueKind != JsonValueKind.Number ||
+            !r.TryGetDouble(out var value) || !double.IsFinite(value) || value < 0) return null;
+        return value;
     }
 }

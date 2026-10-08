@@ -136,6 +136,16 @@ public class HlsVariantParserTests
     }
 
     [Fact]
+    public void AutoQuality_BudgetBoundary_PinsBytesToBitsFactorAndInclusiveCompare()
+    {
+        var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(Manifest)); // 2160,1080 (6_321_284),360
+        // x8 (bytes to bits), x0.7 safety, and <= together: 1_128_801 B/s budgets 6_321_285.6 bit/s,
+        // which covers 1080p's 6_321_284; 1_128_800 B/s budgets 6_321_280, which does not.
+        Assert.Equal(1080, HlsVariantParser.AutoQuality(levels, 2160, 1_128_801)!.Height);
+        Assert.Equal(360, HlsVariantParser.AutoQuality(levels, 2160, 1_128_800)!.Height);
+    }
+
+    [Fact]
     public void AutoQuality_StarvedRate_PicksLowestNotNothing()
     {
         var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(Manifest));

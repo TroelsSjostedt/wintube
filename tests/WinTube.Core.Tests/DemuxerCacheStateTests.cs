@@ -57,7 +57,7 @@ public class DemuxerCacheStateTests
     [Fact]
     public void ParseState_ReadsRawInputRate()
     {
-        var (_, rate) = DemuxerCacheState.ParseState(
+        var (_, rate, _) = DemuxerCacheState.ParseState(
             """{"seekable-ranges":[{"start":0.0,"end":10.0}],"raw-input-rate":5242880}""");
         Assert.Equal(5242880, rate!.Value, 0);
     }
@@ -83,9 +83,39 @@ public class DemuxerCacheStateTests
     [InlineData("[1,2,3]")]
     public void ParseState_GarbageInput_GivesEmptyRanges_AndNullRate(string? json)
     {
-        var (ranges, rate) = DemuxerCacheState.ParseState(json);
+        var (ranges, rate, forward) = DemuxerCacheState.ParseState(json);
         Assert.Empty(ranges);
         Assert.Null(rate);
+        Assert.Null(forward);
+    }
+
+    [Fact]
+    public void ParseState_ReadsForwardBytes()
+    {
+        var (_, _, forward) = DemuxerCacheState.ParseState(
+            """{"seekable-ranges":[],"raw-input-rate":100,"fw-bytes":734003200}""");
+        Assert.Equal(734003200, forward!.Value, 0);
+    }
+
+    [Fact]
+    public void ParseState_MissingOrWrongTypedForwardBytes_IsNull()
+    {
+        Assert.Null(DemuxerCacheState.ParseState("""{"seekable-ranges":[]}""").ForwardBytes);
+        Assert.Null(DemuxerCacheState.ParseState("""{"fw-bytes":"lots"}""").ForwardBytes);
+        Assert.Null(DemuxerCacheState.ParseState("""{"fw-bytes":-5}""").ForwardBytes);
+        Assert.Null(DemuxerCacheState.ParseState(null).ForwardBytes);
+    }
+
+    [Theory]
+    [InlineData(null, 700, false)]                 // unknown fill: never gate
+    [InlineData(0.0, 700, false)]
+    [InlineData(660_602_879.0, 700, false)]        // one byte under 0.9 x 700 MiB (660602880)
+    [InlineData(660_602_880.0, 700, true)]         // exactly 0.9: full
+    [InlineData(734_003_200.0, 700, true)]         // at the cap
+    [InlineData(1_000_000_000.0, 700, true)]       // over (cached-back overshoot)
+    public void IsForwardCacheFull_GatesAtNinetyPercentOfConfiguredCap(double? forwardBytes, int megabytes, bool expected)
+    {
+        Assert.Equal(expected, DemuxerCacheState.IsForwardCacheFull(forwardBytes, megabytes));
     }
 
     [Fact]

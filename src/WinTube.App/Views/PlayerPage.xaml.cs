@@ -87,6 +87,14 @@ public sealed partial class PlayerPage : Page
     /// When the user (or a sponsor skip) last asked mpv to seek; a seek into an uncached range
     /// raises paused-for-cache without the connection being slow.
     private DateTimeOffset? lastSeekAt;
+    /// When the latest granted downshift happened (MonotonicNow), so SuppressedCooldown can be logged
+    /// once per cooldown period: keyed on this value, a new downshift opens a new period.
+    private DateTimeOffset? lastDownshiftAt;
+    /// The lastDownshiftAt a "suppressed (cooldown)" line was already written for.
+    private DateTimeOffset? cooldownLoggedFor;
+    /// Once-per-video log flags for the suppression lines that would otherwise repeat on every stall.
+    private bool floorLogged;
+    private bool capLogged;
     /// The session-wide choice, as on youtube.com: null is Auto; a height pins the nearest
     /// rung at or below it on every video until the app closes. Deliberately not persisted.
     private static int? preferredHeight;
@@ -226,6 +234,10 @@ public sealed partial class PlayerPage : Page
         autoCeilingHeight = null;
         openedAt = null;
         lastSeekAt = null;
+        lastDownshiftAt = null;
+        cooldownLoggedFor = null;
+        floorLogged = false;
+        capLogged = false;
         ClearSponsorMarkers();
         ResetDescription();
         _ = StartAsync(after: null);
@@ -425,11 +437,8 @@ public sealed partial class PlayerPage : Page
     }
 
     /// Pure lookup, no side effects — lets SetPreferredHeight check whether a preference change
-    /// actually lands on a different rung before touching activeQuality/disk/mpv.
-    private HlsQuality ResolveQuality(int? height) =>
-        ResolveQuality(height, height is null ? EffectiveRateBytesPerSecond() : null);
-
-    /// The rate only ever reaches the Auto branch: a manual pin ignores it entirely.
+    /// actually lands on a different rung before touching activeQuality/disk/mpv. The rate only ever
+    /// reaches the Auto branch: a manual pin ignores it entirely.
     private HlsQuality ResolveQuality(int? height, double? autoRateBytesPerSecond) =>
         height is { } wanted
             ? (hlsQualities.FirstOrDefault(q => q.Height <= wanted) ?? hlsQualities[^1])
@@ -460,6 +469,25 @@ public sealed partial class PlayerPage : Page
             ? mbps * 125_000
             : Player?.DownloadRateBytesPerSecond ?? App.Session.PlayerSettings.LoadMeasuredBandwidthBps();
 
+    /// One line per Auto decision, so a pick can be read back from the log: the rate it budgeted against
+    /// (rate x 8 x SafetyFactor = budget, both in Mbit/s), the screen cap, the stall-downshift ceiling
+    /// when one is set, and the rung chosen. No rate means a screen-only pick, so no budget either.
+    private void LogAutoPick(double? autoRate, HlsQuality picked)
+    {
+        var rateText = autoRate is { } r
+            ? $"{FormatMbps(r)}Mbps{(SimulatedMbps() is not null ? "(simulated)" : "")} " +
+              $"budget={FormatMbps(r * AdaptiveAutoTuning.SafetyFactor)}Mbps"
+            : "n/a";
+        var ceilingText = autoCeilingHeight is { } c ? $" ceiling={c}" : "";
+        WinTube.Core.Sync.WatchProgressSync.LogTo(Session.DataDirectory,
+            $"auto: rate={rateText} screen={ScreenHeight()}{ceilingText} → {picked.Height}p");
+    }
+
+    /// Monotonic clock for the stall bookkeeping (grace windows, stall window, cooldown): immune to the
+    /// wall clock stepping back or forward. Only differences between two readings mean anything.
+    private static DateTimeOffset MonotonicNow() =>
+        DateTimeOffset.UnixEpoch.AddMilliseconds(Environment.TickCount64);
+
     private static string FormatMbps(double bytesPerSecond) =>
         (bytesPerSecond * 8 / 1e6).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
 
@@ -472,14 +500,7 @@ public sealed partial class PlayerPage : Page
         double? autoRate = height is null ? EffectiveRateBytesPerSecond() : null;
         var quality = ResolveQuality(height, autoRate);
         activeQuality = quality;
-        if (height is null)
-        {
-            var rateText = autoRate is { } r
-                ? $"{FormatMbps(r)}Mbps{(SimulatedMbps() is not null ? "(simulated)" : "")}"
-                : "n/a";
-            WinTube.Core.Sync.WatchProgressSync.LogTo(Session.DataDirectory,
-                $"auto: rate={rateText} screen={ScreenHeight()} → {quality.Height}p");
-        }
+        if (height is null) LogAutoPick(autoRate, quality);
         var filtered = HlsVariantParser.FilterToBandwidth(hlsMaster!, quality.Bandwidth);
         if (!HlsVariantParser.KeptVariantUriIsAbsoluteHttps(filtered))
             throw new InvalidManifestVariantException();
@@ -524,7 +545,7 @@ public sealed partial class PlayerPage : Page
         host.Opened += () =>
         {
             if (leftPage || host != Player) return;
-            openedAt = DateTimeOffset.UtcNow;
+            openedAt = MonotonicNow();
             HideOverlays();
             WakeTransport();
             // The video surface is the page's only always-present, always-in-tree focus owner —
@@ -600,7 +621,7 @@ public sealed partial class PlayerPage : Page
     /// sponsor auto-skip and the skip button.
     private void SeekPlayer(MpvPlayerHost player, double seconds)
     {
-        lastSeekAt = DateTimeOffset.UtcNow;
+        lastSeekAt = MonotonicNow();
         player.SeekTo(seconds);
     }
 
@@ -616,8 +637,21 @@ public sealed partial class PlayerPage : Page
     {
         if (reloadArmed || !hasPlayed) return;
         if (preferredHeight is not null || hlsMaster is null) return;
-        var now = DateTimeOffset.UtcNow;
+        var now = MonotonicNow();
         if (InStallGrace(now, openedAt) || InStallGrace(now, lastSeekAt)) return;
+
+        // The floor is checked before the policy so a stall on the lowest rung neither counts toward the
+        // window nor spends a downshift grant that cannot be used; the line is logged once per video.
+        if (activeQuality is not { } playing) return;
+        if (NextLowerRung(playing) is null)
+        {
+            if (!floorLogged)
+            {
+                floorLogged = true;
+                LogDownshift($"downshift: at lowest rung ({playing.Height}p)");
+            }
+            return;
+        }
 
         var window = TimeSpan.FromSeconds(AdaptiveAutoTuning.StallWindowSeconds);
         while (recordedStalls.Count > 0 && now - recordedStalls.Peek() >= window) recordedStalls.Dequeue();
@@ -631,10 +665,19 @@ public sealed partial class PlayerPage : Page
                 DownshiftOneRung(now);
                 break;
             case DownshiftDecision.SuppressedCooldown:
-                LogDownshift("downshift: suppressed (cooldown)");
+                // Once per cooldown period (keyed on the downshift that opened it), not per stall.
+                if (cooldownLoggedFor != lastDownshiftAt)
+                {
+                    cooldownLoggedFor = lastDownshiftAt;
+                    LogDownshift("downshift: suppressed (cooldown)");
+                }
                 break;
             case DownshiftDecision.SuppressedCap:
-                LogDownshift("downshift: suppressed (cap)");
+                if (!capLogged)
+                {
+                    capLogged = true;
+                    LogDownshift("downshift: suppressed (cap)");
+                }
                 break;
         }
     }
@@ -651,23 +694,27 @@ public sealed partial class PlayerPage : Page
     /// "Auto - Np" label from activeQuality).
     private void DownshiftOneRung(DateTimeOffset now)
     {
-        if (activeQuality is not { } current) return;
-        var index = -1;
-        for (var i = 0; i < hlsQualities.Count; i++)
-            if (hlsQualities[i].Height == current.Height) { index = i; break; }
-        if (index < 0 || index + 1 >= hlsQualities.Count)
-        {
-            LogDownshift("downshift: suppressed (floor)");
-            return;
-        }
+        // OnBufferingStarted has already ruled out the floor, so a missing rung here is a stale
+        // activeQuality; nothing to step to.
+        if (activeQuality is not { } current || NextLowerRung(current) is not { } target) return;
 
-        var target = hlsQualities[index + 1];
+        lastDownshiftAt = now;
         var stalls = recordedStalls.Count;
-        var seconds = (int)Math.Round((now - recordedStalls.Peek()).TotalSeconds);
+        var seconds = (int)Math.Floor((now - recordedStalls.Peek()).TotalSeconds);
         autoCeilingHeight = target.Height;
         ReloadAtCurrentQuality();
         // The rung actually loaded: normally the target, lower if the live rate cap bites harder.
         LogDownshift($"downshift: {stalls} stalls in {seconds}s → {(activeQuality ?? target).Height}p");
+    }
+
+    /// The rung directly below `current` in the tallest-first ladder, or null at the bottom (or when
+    /// `current` is not on this ladder).
+    private HlsQuality? NextLowerRung(HlsQuality current)
+    {
+        for (var i = 0; i < hlsQualities.Count; i++)
+            if (hlsQualities[i].Height == current.Height)
+                return i + 1 < hlsQualities.Count ? hlsQualities[i + 1] : null;
+        return null;
     }
 
     // MARK: transport bar
@@ -1267,11 +1314,9 @@ public sealed partial class PlayerPage : Page
 
     /// Footer text for the quality flyouts, or null when there is no rate to show.
     private string? RateFooterText() =>
-        SimulatedMbps() is { } mbps
-            ? $"Simulated: {FormatMbps(mbps * 125_000)} Mbit/s"
-            : (Player?.DownloadRateBytesPerSecond ?? App.Session.PlayerSettings.LoadMeasuredBandwidthBps()) is { } rate
-                ? $"Measured: {FormatMbps(rate)} Mbit/s"
-                : null;
+        EffectiveRateBytesPerSecond() is { } rate
+            ? $"{(SimulatedMbps() is not null ? "Simulated" : "Measured")}: {FormatMbps(rate)} Mbit/s"
+            : null;
 
     private const string RateFooterTag = "rate-footer";
 
@@ -1307,8 +1352,12 @@ public sealed partial class PlayerPage : Page
         if (height == preferredHeight) return;
         preferredHeight = height;
         if (hlsMaster is null || Player is null) return;
-        if (ResolveQuality(height).Height == activeQuality?.Height)
+        var autoRate = height is null ? EffectiveRateBytesPerSecond() : null;
+        var resolved = ResolveQuality(height, autoRate);
+        if (resolved.Height == activeQuality?.Height)
         {
+            // No reload means no WriteManifestForHeight, so the Auto decision is logged here instead.
+            if (height is null) LogAutoPick(autoRate, resolved);
             UpdateQualityLabel();
             return;
         }

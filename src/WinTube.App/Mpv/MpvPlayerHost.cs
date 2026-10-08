@@ -541,8 +541,8 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         if (now - rangesPolledAt < RangesPollIntervalMs) return;
         rangesPolledAt = now;
 
-        var (ranges, rawRate) = ReadCacheState();
-        PollDownloadRate(rawRate, now);
+        var (ranges, rawRate, forwardBytes) = ReadCacheState();
+        PollDownloadRate(rawRate, forwardBytes, now);
         if (ranges.AsSpan().SequenceEqual(lastRanges)) return;
         lastRanges = ranges;
         Post(() =>
@@ -556,10 +556,15 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     /// by more than RatePostThreshold (or went to/from null). A null or non-positive reading — the
     /// cache full and idle, or no answer — is left to the smoother to ignore and does not advance
     /// acceptedRateAt, so the next real sample is weighed over the whole gap since the last one.
+    /// The same goes for a reading taken while the forward cache is full (fw-bytes at or above
+    /// CacheFullFraction of CacheForwardMegabytes): this extends the "ignore idle zeros" rule, because a
+    /// full cache measures consumption - raw-input-rate converges to the playing rung's bitrate - not the
+    /// line, and that would otherwise be smoothed, persisted and lower the next video's first pick.
     /// Event thread only.
-    private void PollDownloadRate(double? rawBytesPerSecond, long nowMs)
+    private void PollDownloadRate(double? rawBytesPerSecond, double? forwardBytes, long nowMs)
     {
         if (rawBytesPerSecond is not double raw || !double.IsFinite(raw) || raw <= 0) return;
+        if (DemuxerCacheState.IsForwardCacheFull(forwardBytes, CacheForwardMegabytes)) return;
 
         // acceptedRateAt is 0 before the first accepted sample; the smoother seeds from that one
         // regardless of elapsed, so the huge value that makes is never used.
@@ -574,17 +579,17 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     }
 
     /// Reads demuxer-cache-state as one string — mpv hands a node-valued property back as its full
-    /// JSON form — and lets DemuxerCacheState pick the seekable ranges and raw input rate out of it. (The indexed
+    /// JSON form — and lets DemuxerCacheState pick the seekable ranges, raw input rate and forward bytes out of it. (The indexed
     /// sub-property route, demuxer-cache-state/seekable-ranges/N/start, does not answer.) The first
     /// read after the first FileLoaded logs once whether the property answered at all, which is the
     /// live confirmation that this path works. Any failure yields "no ranges, no rate", never an end
     /// to the event loop.
-    private ((double Start, double End)[] Ranges, double? RawBytesPerSecond) ReadCacheState()
+    private ((double Start, double End)[] Ranges, double? RawBytesPerSecond, double? ForwardBytes) ReadCacheState()
     {
         try
         {
             var json = MpvNative.GetPropertyString(mpv, "demuxer-cache-state");
-            var (parsed, rawRate) = DemuxerCacheState.ParseState(json);
+            var (parsed, rawRate, forwardBytes) = DemuxerCacheState.ParseState(json);
             var ranges = parsed.ToArray();
             if (logCacheState && !cacheStateLogged)
             {
@@ -592,12 +597,12 @@ public sealed class MpvPlayerHost : Grid, IDisposable
                 Log(json is null ? "cache-state: unavailable"
                     : FormattableString.Invariant($"cache-state: {ranges.Length} ranges"));
             }
-            return (ranges, rawRate);
+            return (ranges, rawRate, forwardBytes);
         }
         catch (Exception ex)
         {
             Log($"buffered-range read failed: {ex.Message}");
-            return ([], null);
+            return ([], null, null);
         }
     }
 
