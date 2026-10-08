@@ -31,13 +31,18 @@ public sealed record AudioTrackInfo(int Id, string? Language, string? Title);
 /// touches XAML directly; events raised after Dispose are dropped.
 public sealed class MpvPlayerHost : Grid, IDisposable
 {
-    private const ulong PosUserdata = 1, DurUserdata = 2, PauseUserdata = 3, EofUserdata = 4;
+    private const ulong PosUserdata = 1, DurUserdata = 2, PauseUserdata = 3, EofUserdata = 4,
+        BufferingUserdata = 5;
 
     public event Action? Opened;
     public event Action<double>? PositionChanged;
     public event Action<bool>? PausedChanged;
     public event Action? EndReached;
     public event Action<string>? Errored;
+
+    /// Raised on the UI thread on each false->true edge of mpv's paused-for-cache — playback ran dry
+    /// and stopped to refill — not on the true->false recovery and not while it stays true.
+    public event Action? BufferingStarted;
 
     /// Raised on the UI thread after Opened, once per FileLoaded (reloads included), with
     /// AudioTracks/SelectedAudioId already updated — also for a file with 0 or 1 audio tracks,
@@ -60,6 +65,11 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     /// Seconds-from-start spans mpv's demuxer currently holds and could seek within without
     /// re-fetching, as of the latest BufferedRangesChanged. Empty before the first read. UI thread only.
     public IReadOnlyList<(double Start, double End)> BufferedRanges { get; private set; } = [];
+
+    /// Smoothed network download rate in bytes per second, from mpv's raw input rate polled with the
+    /// buffered ranges; null until a poll first reports a positive rate. Refreshed only when it moves
+    /// by more than 1% (or flips to/from null), so a steady connection posts nothing. UI thread only.
+    public double? DownloadRateBytesPerSecond { get; private set; }
 
     /// Stream-cache sizing, applied by CreateMpv: set before the first Load (the options are read
     /// once, when mpv is created). Defaults match PlayerSettingsStore's, which is where PlayerPage
@@ -121,6 +131,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     private double volume = 1.0, speed = 1.0;
     private bool subtitleVisible = true;
     private bool eofReached; // edge-detects eof-reached false->true; event thread only
+    private bool pausedForCache; // edge-detects paused-for-cache false->true; event thread only
 
     // Buffered-range polling, event thread only: when it last ran, and what it last posted (the
     // suppression baseline, so an unchanged cache raises nothing).
@@ -129,6 +140,17 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     private long rangesPolledAt;
     private (double Start, double End)[] lastRanges = [];
     private const long RangesPollIntervalMs = 1000;
+
+    // Download-rate smoothing, event thread only. One smoother for the host's whole life, deliberately
+    // NOT reset by DoLoad: a quality switch reloads over the same connection, and blanking the
+    // measured rate there would throw away the one thing the next Auto pick needs. The smoother has no
+    // clock, so the poll supplies elapsed = seconds since the last ACCEPTED sample (acceptedRateAt,
+    // TickCount64 ms; 0 until the first), which is what its EMA weights by. lastPostedRate is the
+    // >1% suppression baseline for what the UI thread was last told.
+    private readonly BandwidthSmoother rateSmoother = new();
+    private long acceptedRateAt;
+    private double? lastPostedRate;
+    private const double RatePostThreshold = 0.01;
     // One cache-state diagnostic line per host. Armed by the first FileLoaded: before a file is
     // open the property legitimately has no answer, which would read as "unavailable".
     private bool logCacheState, cacheStateLogged;
@@ -357,6 +379,9 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         // end-file/eof event; eof-reached is the only signal left, so EndReached is driven off its
         // false->true edge (HandlePropertyChange) instead of the end-file event.
         MpvNative.mpv_observe_property(mpv, EofUserdata, Utf8("eof-reached"), MpvNative.FormatFlag);
+        // True while playback is stalled waiting on the cache to refill; BufferingStarted is its
+        // false->true edge (HandlePropertyChange).
+        MpvNative.mpv_observe_property(mpv, BufferingUserdata, Utf8("paused-for-cache"), MpvNative.FormatFlag);
     }
 
     private void ApplySubtitleVisibility() =>
@@ -506,16 +531,18 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         return (tracks, selectedId);
     }
 
-    /// At most once per RangesPollIntervalMs: reads demuxer-cache-state's seekable ranges and posts
-    /// only when they differ from the last post. Event thread only. Nothing else in this class has
-    /// to wake for it — the loop already spins at least once a second.
+    /// At most once per RangesPollIntervalMs: reads demuxer-cache-state once, posts the seekable
+    /// ranges only when they differ from the last post, and feeds the raw input rate to the smoother
+    /// (PollDownloadRate). Event thread only. Nothing else in this class has to wake for it — the
+    /// loop already spins at least once a second.
     private void PollBufferedRanges()
     {
         var now = Environment.TickCount64;
         if (now - rangesPolledAt < RangesPollIntervalMs) return;
         rangesPolledAt = now;
 
-        var ranges = ReadBufferedRanges();
+        var (ranges, rawRate) = ReadCacheState();
+        PollDownloadRate(rawRate, now);
         if (ranges.AsSpan().SequenceEqual(lastRanges)) return;
         lastRanges = ranges;
         Post(() =>
@@ -525,30 +552,52 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         });
     }
 
+    /// Folds one raw input-rate reading into the smoother and posts the smoothed value when it moved
+    /// by more than RatePostThreshold (or went to/from null). A null or non-positive reading — the
+    /// cache full and idle, or no answer — is left to the smoother to ignore and does not advance
+    /// acceptedRateAt, so the next real sample is weighed over the whole gap since the last one.
+    /// Event thread only.
+    private void PollDownloadRate(double? rawBytesPerSecond, long nowMs)
+    {
+        if (rawBytesPerSecond is not double raw || !double.IsFinite(raw) || raw <= 0) return;
+
+        // acceptedRateAt is 0 before the first accepted sample; the smoother seeds from that one
+        // regardless of elapsed, so the huge value that makes is never used.
+        rateSmoother.Sample(raw, (nowMs - acceptedRateAt) / 1000.0);
+        acceptedRateAt = nowMs;
+
+        var smoothed = rateSmoother.BytesPerSecond;
+        if (smoothed is not double current) return;
+        if (lastPostedRate is double last && Math.Abs(current - last) <= last * RatePostThreshold) return;
+        lastPostedRate = current;
+        Post(() => DownloadRateBytesPerSecond = current);
+    }
+
     /// Reads demuxer-cache-state as one string — mpv hands a node-valued property back as its full
-    /// JSON form — and lets DemuxerCacheState pick the seekable ranges out of it. (The indexed
+    /// JSON form — and lets DemuxerCacheState pick the seekable ranges and raw input rate out of it. (The indexed
     /// sub-property route, demuxer-cache-state/seekable-ranges/N/start, does not answer.) The first
     /// read after the first FileLoaded logs once whether the property answered at all, which is the
-    /// live confirmation that this path works. Any failure yields "no ranges", never an end to the
-    /// event loop.
-    private (double Start, double End)[] ReadBufferedRanges()
+    /// live confirmation that this path works. Any failure yields "no ranges, no rate", never an end
+    /// to the event loop.
+    private ((double Start, double End)[] Ranges, double? RawBytesPerSecond) ReadCacheState()
     {
         try
         {
             var json = MpvNative.GetPropertyString(mpv, "demuxer-cache-state");
-            var ranges = DemuxerCacheState.ParseRanges(json).ToArray();
+            var (parsed, rawRate) = DemuxerCacheState.ParseState(json);
+            var ranges = parsed.ToArray();
             if (logCacheState && !cacheStateLogged)
             {
                 cacheStateLogged = true;
                 Log(json is null ? "cache-state: unavailable"
                     : FormattableString.Invariant($"cache-state: {ranges.Length} ranges"));
             }
-            return ranges;
+            return (ranges, rawRate);
         }
         catch (Exception ex)
         {
             Log($"buffered-range read failed: {ex.Message}");
-            return [];
+            return ([], null);
         }
     }
 
@@ -590,6 +639,11 @@ public sealed class MpvPlayerHost : Grid, IDisposable
                 var eof = Marshal.ReadInt32(prop.Data) != 0;
                 if (eof && !eofReached) { eofReached = true; Post(() => EndReached?.Invoke()); }
                 else if (!eof) eofReached = false; // reset for the next Load's edge
+                break;
+            case BufferingUserdata when prop.Format == MpvNative.FormatFlag:
+                var buffering = Marshal.ReadInt32(prop.Data) != 0;
+                if (buffering && !pausedForCache) { pausedForCache = true; Post(() => BufferingStarted?.Invoke()); }
+                else if (!buffering) pausedForCache = false; // recovery re-arms the edge
                 break;
         }
     }
