@@ -93,6 +93,38 @@ public sealed class PlayerSettingsStore(string dataDirectory)
         Save(settings);
     }
 
+    /// The download rate (bytes/s) the last session measured at teardown, seeding Auto's first pick.
+    /// Null if nothing usable is stored: absent, wrong-typed, or not a positive finite number.
+    public double? LoadMeasuredBandwidthBps()
+    {
+        if (Load()["measuredBandwidthBps"] is JsonValue v && v.TryGetValue(out double d) && double.IsFinite(d) && d > 0)
+        {
+            return d;
+        }
+        return null;
+    }
+
+    /// Saves the measured download rate, preserving other settings. Only a positive finite rate is
+    /// stored; anything else is dropped so the previous measurement stays in place.
+    public void SaveMeasuredBandwidthBps(double bytesPerSecond)
+    {
+        if (!double.IsFinite(bytesPerSecond) || bytesPerSecond <= 0) return;
+        var settings = Load();
+        settings["measuredBandwidthBps"] = bytesPerSecond;
+        Save(settings);
+    }
+
+    /// The hand-edited test override for Auto's bandwidth, in megabits per second. Read-only — nothing
+    /// in the app writes it. Null if absent, wrong-typed, or not a positive finite number.
+    public double? LoadSimulatedBandwidthMbps()
+    {
+        if (Load()["simulatedBandwidthMbps"] is JsonValue v && v.TryGetValue(out double d) && double.IsFinite(d) && d > 0)
+        {
+            return d;
+        }
+        return null;
+    }
+
     // Stream-cache tuning. Read-only, edited by hand in settings.json (like the secrets overrides) —
     // no savers, so nothing in the app ever rewrites them. Defaults are sized for a long adaptive
     // video: ten minutes of lookahead, ~700 MB forward and ~300 MB of back-buffer for rewinds.

@@ -265,4 +265,52 @@ public class PlayerSettingsStoreTests : IDisposable
         store.SaveVolume(0.5);
         Assert.Equal(900, store.CacheForwardMegabytes());
     }
+
+    [Fact]
+    public void Store_MeasuredAndSimulatedBandwidthRoundTrip()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var store = new PlayerSettingsStore(dir);
+        Assert.Null(store.LoadMeasuredBandwidthBps());
+        store.SaveMeasuredBandwidthBps(5_000_000);
+        Assert.Equal(5_000_000, store.LoadMeasuredBandwidthBps()!.Value, 0);
+        Assert.Null(store.LoadSimulatedBandwidthMbps());
+        File.WriteAllText(Path.Combine(dir, "settings.json"),
+            """{"measuredBandwidthBps":1,"simulatedBandwidthMbps":25}""");
+        Assert.Equal(25, store.LoadSimulatedBandwidthMbps()!.Value, 0);
+    }
+
+    [Fact]
+    public void Store_WrongTypedBandwidthKeys_AreNull()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "settings.json"),
+            """{"measuredBandwidthBps":{},"simulatedBandwidthMbps":"fast"}""");
+        var store = new PlayerSettingsStore(dir);
+        Assert.Null(store.LoadMeasuredBandwidthBps());
+        Assert.Null(store.LoadSimulatedBandwidthMbps());
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(-5.0)]
+    [InlineData(double.NaN)]
+    public void Store_NonPositiveOrNaNMeasuredBandwidth_IsNotSaved(double bps)
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var store = new PlayerSettingsStore(dir);
+        store.SaveMeasuredBandwidthBps(5_000_000);
+        store.SaveMeasuredBandwidthBps(bps);
+        Assert.Equal(5_000_000, store.LoadMeasuredBandwidthBps()!.Value, 0);
+    }
+
+    [Theory]
+    [InlineData("""{"simulatedBandwidthMbps":0}""")]
+    [InlineData("""{"simulatedBandwidthMbps":-4}""")]
+    public void Store_NonPositiveSimulatedBandwidth_IsNull(string json)
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "settings.json"), json);
+        Assert.Null(new PlayerSettingsStore(dir).LoadSimulatedBandwidthMbps());
+    }
 }
