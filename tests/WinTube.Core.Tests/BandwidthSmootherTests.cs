@@ -5,10 +5,38 @@ namespace WinTube.Core.Tests;
 public class BandwidthSmootherTests
 {
     [Fact]
-    public void Smoother_ConvergesTowardSteadyRate()
+    public void Smoother_HalfLifeWeightsANewSampleByHalf()
+    {
+        // One half-life after a seed, a new sample carries exactly half the weight: (1e6 + 3e6) / 2.
+        var s = new BandwidthSmoother();
+        s.Sample(1_000_000, 1.0);
+        s.Sample(3_000_000, AdaptiveAutoTuning.RateSmoothingHalfLifeSeconds);
+        Assert.True(Math.Abs(s.BytesPerSecond!.Value - 2_000_000) <= 1,
+            $"expected 2,000,000 +/- 1, got {s.BytesPerSecond}");
+    }
+
+    [Fact]
+    public void Smoother_TracksAStepThenDampsIt()
     {
         var s = new BandwidthSmoother();
-        for (var i = 0; i < 20; i++) s.Sample(1_000_000, 1.0);
+        s.Sample(1_000_000, 1.0);
+        s.Sample(2_000_000, 1.0);
+        var first = s.BytesPerSecond!.Value;
+        Assert.True(first > 1_000_000 && first < 2_000_000, $"first step landed at {first}");
+        s.Sample(2_000_000, 1.0);
+        var second = s.BytesPerSecond!.Value;
+        Assert.True(second > first && second < 2_000_000, $"second step landed at {second}");
+    }
+
+    [Fact]
+    public void Smoother_FirstSampleSeedsEvenWithoutElapsedTime_ThenRejectsBadElapsed()
+    {
+        var s = new BandwidthSmoother();
+        s.Sample(1_000_000, 0);
+        Assert.Equal(1_000_000, s.BytesPerSecond!.Value, 0);
+        // Once seeded, a sample with no usable elapsed time must not move the value.
+        s.Sample(2_000_000, 0);
+        s.Sample(2_000_000, double.NaN);
         Assert.Equal(1_000_000, s.BytesPerSecond!.Value, 0);
     }
 

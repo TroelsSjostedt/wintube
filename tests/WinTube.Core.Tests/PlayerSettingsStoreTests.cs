@@ -313,4 +313,20 @@ public class PlayerSettingsStoreTests : IDisposable
         File.WriteAllText(Path.Combine(dir, "settings.json"), json);
         Assert.Null(new PlayerSettingsStore(dir).LoadSimulatedBandwidthMbps());
     }
+
+    [Fact]
+    public void BandwidthKeys_AndVolume_PreserveEachOther()
+    {
+        var dir = WriteSettings("""{"simulatedBandwidthMbps":25,"volume":0.4}""");
+        var store = new PlayerSettingsStore(dir);
+        store.SaveMeasuredBandwidthBps(5_000_000);
+        Assert.Equal(5_000_000, store.LoadMeasuredBandwidthBps()!.Value, 0);
+        Assert.Equal(25, store.LoadSimulatedBandwidthMbps()!.Value, 0);
+        Assert.Equal(0.4, store.LoadVolume(), 3);
+        // The reverse direction: a volume save must keep the measured rate and the override.
+        store.SaveVolume(0.9);
+        Assert.Equal(5_000_000, store.LoadMeasuredBandwidthBps()!.Value, 0);
+        Assert.Equal(25, store.LoadSimulatedBandwidthMbps()!.Value, 0);
+        Assert.Equal(0.9, store.LoadVolume(), 3);
+    }
 }
