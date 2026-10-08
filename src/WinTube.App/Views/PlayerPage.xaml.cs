@@ -838,13 +838,9 @@ public sealed partial class PlayerPage : Page
 
         foreach (var segment in sponsorSegments)
         {
-            var rect = new Microsoft.UI.Xaml.Shapes.Rectangle
-            {
-                Width = Math.Max(1, segment.Duration / duration * span),
-                Height = 4,
-                Fill = SponsorMarkerBrush,
-            };
-            Canvas.SetLeft(rect, inset + segment.Start / duration * span);
+            var (left, width) = OverlayBar(segment.Start, segment.Start + segment.Duration, duration, inset, span);
+            var rect = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = width, Height = 4, Fill = SponsorMarkerBrush };
+            Canvas.SetLeft(rect, left);
             SponsorMarkers.Children.Add(rect);
         }
     }
@@ -863,15 +859,23 @@ public sealed partial class PlayerPage : Page
             var from = Math.Clamp(start, 0, duration);
             var to = Math.Clamp(end, 0, duration);
             if (to <= from) continue;
-            var rect = new Microsoft.UI.Xaml.Shapes.Rectangle
-            {
-                Width = Math.Max(1, (to - from) / duration * span),
-                Height = 4,
-                Fill = BufferedRangeBrush,
-            };
-            Canvas.SetLeft(rect, inset + from / duration * span);
+            var (left, width) = OverlayBar(from, to, duration, inset, span);
+            var rect = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = width, Height = 4, Fill = BufferedRangeBrush };
+            Canvas.SetLeft(rect, left);
             BufferedMarkers.Children.Add(rect);
         }
+    }
+
+    /// Left/width of one overlay bar for the time span [from, to]. Interior edges use the exact
+    /// thumb mapping, but the Slider's own fill runs to the CONTROL's edges (the thumb inset only
+    /// limits where the thumb centre travels), so an edge within 0.5 s of the start/end is pulled out
+    /// to x=0 / the full ActualWidth, or a ~inset-wide stub of bare slider fill shows beside the bar.
+    private (double Left, double Width) OverlayBar(double from, double to, double duration, double inset, double span)
+    {
+        const double edgeSeconds = 0.5;
+        var left = from <= edgeSeconds ? 0 : inset + from / duration * span;
+        var right = to >= duration - edgeSeconds ? SeekBar.ActualWidth : inset + to / duration * span;
+        return (left, Math.Max(1, right - left));
     }
 
     /// The shared overlay mapping: x(t) = inset + t / duration * span, with span = trackWidth -
