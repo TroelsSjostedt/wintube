@@ -165,6 +165,12 @@ public sealed partial class PlayerPage : Page
         SeekBar.AddHandler(PointerPressedEvent, new PointerEventHandler(OnSeekBarPointerPressed), true);
         SeekBar.AddHandler(PointerReleasedEvent, new PointerEventHandler(OnSeekBarPointerReleased), true);
         SeekBar.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(OnSeekBarPointerReleased), true);
+        // Same reason for the hover bubble: the Slider handles PointerMoved itself during a drag,
+        // and the bubble has to keep following the pointer then.
+        SeekBar.AddHandler(PointerEnteredEvent, new PointerEventHandler(OnSeekBarPointerMoved), true);
+        SeekBar.AddHandler(PointerMovedEvent, new PointerEventHandler(OnSeekBarPointerMoved), true);
+        SeekBar.AddHandler(PointerExitedEvent, new PointerEventHandler(OnSeekBarPointerLeft), true);
+        SeekBar.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(OnSeekBarPointerLeft), true);
         VideoGrid.AddHandler(PointerMovedEvent, new PointerEventHandler(OnVideoGridPointerMoved), true);
     }
 
@@ -558,6 +564,38 @@ public sealed partial class PlayerPage : Page
             : $"{(int)span.TotalMinutes}:{span.Seconds:D2}";
     }
 
+    private void OnSeekBarPointerMoved(object sender, PointerRoutedEventArgs e) =>
+        ShowSeekHover(e.GetCurrentPoint(SeekBar).Position.X);
+
+    private void OnSeekBarPointerLeft(object sender, PointerRoutedEventArgs e) =>
+        SeekHoverBubble.Visibility = Visibility.Collapsed;
+
+    /// Time under the pointer, as a bubble above the seek bar. Inverts the shared overlay mapping
+    /// (TryGetTrackMapping): x(t) = inset + t / duration * span  =>  t = (x - inset) / span *
+    /// duration, clamped to [0, duration] so the 9 px of track either side of the thumb centre
+    /// range read as the first/last second. Hidden while the mapping is unusable (duration unknown).
+    /// Called on every move, so it also re-shows the bubble after a drag's capture-lost hid it with
+    /// the pointer still over the bar. x is relative to SeekBar, which shares SeekHoverLayer's origin.
+    private void ShowSeekHover(double x)
+    {
+        if (!TryGetTrackMapping(out var duration, out var inset, out var span))
+        {
+            SeekHoverBubble.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var time = Math.Clamp((x - inset) / span, 0, 1) * duration;
+        SeekHoverText.Text = Fmt(time, duration);
+        SeekHoverBubble.Visibility = Visibility.Visible;
+        SeekHoverBubble.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var size = SeekHoverBubble.DesiredSize;
+
+        // Centred on the pointer, kept inside the bar's own width.
+        var left = Math.Clamp(x - size.Width / 2, 0, Math.Max(0, SeekBar.ActualWidth - size.Width));
+        Canvas.SetLeft(SeekHoverBubble, left);
+        Canvas.SetTop(SeekHoverBubble, -(size.Height + 4));
+    }
+
     private void OnSeekBarPointerPressed(object sender, PointerRoutedEventArgs e) => seekBarHeld = true;
 
     private void OnSeekBarPointerReleased(object sender, PointerRoutedEventArgs e)
@@ -748,6 +786,7 @@ public sealed partial class PlayerPage : Page
     private void SetTransportVisible(bool visible)
     {
         TransportBar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (!visible) SeekHoverBubble.Visibility = Visibility.Collapsed;
         ProtectedCursor = visible ? InputSystemCursor.Create(InputSystemCursorShape.Arrow) : null;
     }
 

@@ -73,7 +73,8 @@
                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Slider x:Name="SeekBar" Grid.Row="0" Minimum="0" StepFrequency="1"
-                        ThumbToolTipValueConverter="{x:Null}" SizeChanged="OnSeekBarSizeChanged"/>
+                        IsThumbToolTipEnabled="False" ThumbToolTipValueConverter="{x:Null}"
+                        SizeChanged="OnSeekBarSizeChanged"/>
                 <!-- Both overlays sit in the same cell as SeekBar so they track the slider's own
                      width. Z-order is document order: BufferedMarkers is declared first so the
                      yellow sponsor rectangles draw over it. Buffered ranges are rebuilt in
@@ -83,6 +84,17 @@
                         IsHitTestVisible="False"/>
                 <Canvas x:Name="SponsorMarkers" Grid.Row="0" Height="4" VerticalAlignment="Center"
                         IsHitTestVisible="False"/>
+                <!-- Hover time bubble. A Canvas in the SeekBar's own cell so it adds no layout height
+                     (a Canvas measures to 0) and shares SeekBar's x origin; ShowSeekHover places the
+                     bubble at a negative Top, i.e. above the bar, over the video. Declared last so it
+                     draws over the overlays. -->
+                <Canvas x:Name="SeekHoverLayer" Grid.Row="0" IsHitTestVisible="False">
+                    <Border x:Name="SeekHoverBubble" Visibility="Collapsed"
+                            Background="{ThemeResource SystemControlBackgroundAltHighBrush}"
+                            CornerRadius="4" Padding="8,2" IsHitTestVisible="False">
+                        <TextBlock x:Name="SeekHoverText" FontSize="12"/>
+                    </Border>
+                </Canvas>
                 <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">
                     <Button x:Name="PlayPauseButton" Grid.Column="0" Click="OnPlayPauseClick"
                             Background="Transparent" BorderThickness="0">
