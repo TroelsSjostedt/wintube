@@ -53,4 +53,45 @@ public class DemuxerCacheStateTests
         // Wrong-typed, incomplete, empty (end == start) and inverted spans are dropped.
         Assert.Equal([(10.0, 20.0)], DemuxerCacheState.ParseRanges(json));
     }
+
+    [Fact]
+    public void ParseState_ReadsRawInputRate()
+    {
+        var (_, rate) = DemuxerCacheState.ParseState(
+            """{"seekable-ranges":[{"start":0.0,"end":10.0}],"raw-input-rate":5242880}""");
+        Assert.Equal(5242880, rate!.Value, 0);
+    }
+
+    [Fact]
+    public void ParseState_MissingOrWrongTypedRate_IsNull()
+    {
+        Assert.Null(DemuxerCacheState.ParseState("""{"seekable-ranges":[]}""").RawInputBytesPerSecond);
+        Assert.Null(DemuxerCacheState.ParseState("""{"raw-input-rate":"fast"}""").RawInputBytesPerSecond);
+        Assert.Null(DemuxerCacheState.ParseState(null).RawInputBytesPerSecond);
+        Assert.Null(DemuxerCacheState.ParseState("garbage").RawInputBytesPerSecond);
+    }
+
+    [Fact]
+    public void ParseState_NegativeRate_IsNull()
+    {
+        Assert.Null(DemuxerCacheState.ParseState("""{"raw-input-rate":-1.0}""").RawInputBytesPerSecond);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{not json")]
+    [InlineData("[1,2,3]")]
+    public void ParseState_GarbageInput_GivesEmptyRanges_AndNullRate(string? json)
+    {
+        var (ranges, rate) = DemuxerCacheState.ParseState(json);
+        Assert.Empty(ranges);
+        Assert.Null(rate);
+    }
+
+    [Fact]
+    public void ParseState_RangesMatchParseRanges()
+    {
+        const string json = """{"seekable-ranges":[{"start":1.0,"end":2.0}],"raw-input-rate":100}""";
+        Assert.Equal(DemuxerCacheState.ParseRanges(json), DemuxerCacheState.ParseState(json).Ranges);
+    }
 }
