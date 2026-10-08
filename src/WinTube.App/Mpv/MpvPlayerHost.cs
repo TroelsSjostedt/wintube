@@ -518,6 +518,10 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         var ranges = ReadBufferedRanges();
         if (ranges.AsSpan().SequenceEqual(lastRanges)) return;
         lastRanges = ranges;
+        // TEMPORARY: raw parsed ranges beside the playhead, for the seekbar-gap diagnosis; strip afterwards.
+        Log("ranges: [" + string.Join(", ", ranges.Take(6).Select(r =>
+                FormattableString.Invariant($"{r.Start:F1}-{r.End:F1}"))) + "] pos=" +
+            (MpvNative.GetPropertyString(mpv, "time-pos") ?? "n/a"));
         Post(() =>
         {
             BufferedRanges = ranges;
