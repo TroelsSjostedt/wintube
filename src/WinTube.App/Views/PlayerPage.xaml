@@ -32,7 +32,7 @@
                 <DropDownButton x:Name="QualityButton" VerticalAlignment="Center" Visibility="Collapsed">
                     <TextBlock x:Name="QualityLabel" Text="Auto"/>
                     <DropDownButton.Flyout>
-                        <MenuFlyout x:Name="QualityFlyout"/>
+                        <MenuFlyout x:Name="QualityFlyout" Opening="OnQualityFlyoutOpening"/>
                     </DropDownButton.Flyout>
                 </DropDownButton>
                 <ToggleButton x:Name="CommentsButton" Click="OnToggleComments" VerticalAlignment="Center">
@@ -129,7 +129,7 @@
                                     Visibility="Collapsed" Background="Transparent" BorderThickness="0" Margin="0,0,4,0">
                         <TextBlock x:Name="QualityLabelBar" Text="Auto"/>
                         <DropDownButton.Flyout>
-                            <MenuFlyout x:Name="QualityFlyoutBar"/>
+                            <MenuFlyout x:Name="QualityFlyoutBar" Opening="OnQualityFlyoutOpening"/>
                         </DropDownButton.Flyout>
                     </DropDownButton>
                     <ToggleButton x:Name="CommentsButtonBar" Grid.Column="6" Click="OnToggleComments"

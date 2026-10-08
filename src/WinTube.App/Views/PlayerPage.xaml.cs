@@ -63,6 +63,11 @@ public sealed partial class PlayerPage : Page
     private IReadOnlyList<HlsVariant> hlsVariants = [];
     private IReadOnlyList<HlsQuality> hlsQualities = [];
     private HlsQuality? activeQuality;
+    /// hand-edited simulatedBandwidthMbps override, read once per page (a fresh PlayerPage per
+    /// video) — settings reads are file I/O and Auto resolves, teardown and every flyout
+    /// opening all need it. simulatedMbpsRead distinguishes "not read yet" from "read, absent".
+    private double? simulatedMbps;
+    private bool simulatedMbpsRead;
     /// The session-wide choice, as on youtube.com: null is Auto; a height pins the nearest
     /// rung at or below it on every video until the app closes. Deliberately not persisted.
     private static int? preferredHeight;
@@ -196,6 +201,7 @@ public sealed partial class PlayerPage : Page
 
         leftPage = false;
         retried = false;
+        simulatedMbpsRead = false;
         ClearSponsorMarkers();
         ResetDescription();
         _ = StartAsync(after: null);
@@ -397,9 +403,35 @@ public sealed partial class PlayerPage : Page
     /// Pure lookup, no side effects — lets SetPreferredHeight check whether a preference change
     /// actually lands on a different rung before touching activeQuality/disk/mpv.
     private HlsQuality ResolveQuality(int? height) =>
+        ResolveQuality(height, height is null ? EffectiveRateBytesPerSecond() : null);
+
+    /// The rate only ever reaches the Auto branch: a manual pin ignores it entirely.
+    private HlsQuality ResolveQuality(int? height, double? autoRateBytesPerSecond) =>
         height is { } wanted
             ? (hlsQualities.FirstOrDefault(q => q.Height <= wanted) ?? hlsQualities[^1])
-            : HlsVariantParser.AutoQuality(hlsQualities, ScreenHeight())!;
+            : HlsVariantParser.AutoQuality(hlsQualities, ScreenHeight(), autoRateBytesPerSecond)!;
+
+    /// The hand-edited simulated bandwidth (Mbit/s), cached for the life of the page.
+    private double? SimulatedMbps()
+    {
+        if (!simulatedMbpsRead)
+        {
+            simulatedMbps = App.Session.PlayerSettings.LoadSimulatedBandwidthMbps();
+            simulatedMbpsRead = true;
+        }
+        return simulatedMbps;
+    }
+
+    /// What Auto budgets against, in bytes per second: the simulated override when set, else the
+    /// live host rate, else the last session's persisted measurement; null when none of them has
+    /// anything (Auto then falls back to the screen-only pick).
+    private double? EffectiveRateBytesPerSecond() =>
+        SimulatedMbps() is { } mbps
+            ? mbps * 125_000
+            : Player?.DownloadRateBytesPerSecond ?? App.Session.PlayerSettings.LoadMeasuredBandwidthBps();
+
+    private static string FormatMbps(double bytesPerSecond) =>
+        (bytesPerSecond * 8 / 1e6).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
 
     /// mpv reads manifests from disk happily; one scratch file per page, overwritten per load.
     /// M7: the filtered manifest's kept variant is checked before it ever reaches disk — a
@@ -407,8 +439,17 @@ public sealed partial class PlayerPage : Page
     /// on rather than silently handing mpv something it may resolve unexpectedly.
     private string WriteManifestForHeight(int? height)
     {
-        var quality = ResolveQuality(height);
+        double? autoRate = height is null ? EffectiveRateBytesPerSecond() : null;
+        var quality = ResolveQuality(height, autoRate);
         activeQuality = quality;
+        if (height is null)
+        {
+            var rateText = autoRate is { } r
+                ? $"{FormatMbps(r)}Mbps{(SimulatedMbps() is not null ? "(simulated)" : "")}"
+                : "n/a";
+            WinTube.Core.Sync.WatchProgressSync.LogTo(Session.DataDirectory,
+                $"auto: rate={rateText} screen={ScreenHeight()} → {quality.Height}p");
+        }
         var filtered = HlsVariantParser.FilterToBandwidth(hlsMaster!, quality.Bandwidth);
         if (!HlsVariantParser.KeptVariantUriIsAbsoluteHttps(filtered))
             throw new InvalidManifestVariantException();
@@ -1030,6 +1071,10 @@ public sealed partial class PlayerPage : Page
 
         if (Player is { } p)
         {
+            // The next session's first Auto pick is seeded from this one's last rate. A simulated
+            // bandwidth is a test override, so the real measurement is neither used nor stored then.
+            if (SimulatedMbps() is null && p.DownloadRateBytesPerSecond is { } rate)
+                App.Session.PlayerSettings.SaveMeasuredBandwidthBps(rate);
             PlayerSlot.Children.Remove(p);
             p.Dispose();
         }
@@ -1107,6 +1152,36 @@ public sealed partial class PlayerPage : Page
             item.Click += (_, _) => SetPreferredHeight(height);
             flyout.Items.Add(item);
         }
+        AppendRateFooter(flyout);
+    }
+
+    /// Footer text for the quality flyouts, or null when there is no rate to show.
+    private string? RateFooterText() =>
+        SimulatedMbps() is { } mbps
+            ? $"Simulated: {FormatMbps(mbps * 125_000)} Mbit/s"
+            : (Player?.DownloadRateBytesPerSecond ?? App.Session.PlayerSettings.LoadMeasuredBandwidthBps()) is { } rate
+                ? $"Measured: {FormatMbps(rate)} Mbit/s"
+                : null;
+
+    private const string RateFooterTag = "rate-footer";
+
+    /// A separator plus a disabled (greyed, unclickable, unchecked) text line under the picker's
+    /// items, so the rate Auto is acting on is visible. Both carry RateFooterTag so a refresh can
+    /// find and replace them. Never added to an empty flyout (the muxed fallback's single rung).
+    private void AppendRateFooter(MenuFlyout flyout)
+    {
+        if (flyout.Items.Count == 0 || RateFooterText() is not { } text) return;
+        flyout.Items.Add(new MenuFlyoutSeparator { Tag = RateFooterTag });
+        flyout.Items.Add(new MenuFlyoutItem { Text = text, IsEnabled = false, Tag = RateFooterTag });
+    }
+
+    /// The live rate moves while the flyout is closed, so each opening rebuilds just the footer.
+    private void OnQualityFlyoutOpening(object sender, object e)
+    {
+        if (sender is not MenuFlyout flyout) return;
+        for (var i = flyout.Items.Count - 1; i >= 0; i--)
+            if (flyout.Items[i].Tag is RateFooterTag) flyout.Items.RemoveAt(i);
+        AppendRateFooter(flyout);
     }
 
     /// Mode (Auto vs a manual pin) and playback are independent, so the stored choice always
