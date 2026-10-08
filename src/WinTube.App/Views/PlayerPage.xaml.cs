@@ -68,6 +68,25 @@ public sealed partial class PlayerPage : Page
     /// opening all need it. simulatedMbpsRead distinguishes "not read yet" from "read, absent".
     private double? simulatedMbps;
     private bool simulatedMbpsRead;
+
+    // MARK: stall downshift state (all per video, reset in OnNavigatedTo)
+    /// Level 2 of the adaptive Auto policy: counts genuine stalls and decides when Auto steps down
+    /// one rung. Lives on the UI thread with everything else (BufferingStarted is already posted
+    /// there). Deliberately NOT reset by a ladder retry re-entering PlayAsync - same video, so the
+    /// stall history and the downshift budget carry over.
+    private readonly DownshiftPolicy downshiftPolicy = new();
+    /// Mirror of the stalls the policy has been given, pruned by the policy's own window rule, only
+    /// so the downshift log line can say "2 stalls in 38s" (the policy keeps its list private).
+    private readonly Queue<DateTimeOffset> recordedStalls = new();
+    /// Per-video cap on what Auto may resolve to, set by a granted downshift and consumed by
+    /// ResolveQuality's Auto branch next to the screen height. Null until the first downshift.
+    private int? autoCeilingHeight;
+    /// When the latest file open (first load or any reload) landed; buffering edges shortly after
+    /// are the open's own, not a bandwidth signal.
+    private DateTimeOffset? openedAt;
+    /// When the user (or a sponsor skip) last asked mpv to seek; a seek into an uncached range
+    /// raises paused-for-cache without the connection being slow.
+    private DateTimeOffset? lastSeekAt;
     /// The session-wide choice, as on youtube.com: null is Auto; a height pins the nearest
     /// rung at or below it on every video until the app closes. Deliberately not persisted.
     private static int? preferredHeight;
@@ -202,6 +221,11 @@ public sealed partial class PlayerPage : Page
         leftPage = false;
         retried = false;
         simulatedMbpsRead = false;
+        downshiftPolicy.Reset();
+        recordedStalls.Clear();
+        autoCeilingHeight = null;
+        openedAt = null;
+        lastSeekAt = null;
         ClearSponsorMarkers();
         ResetDescription();
         _ = StartAsync(after: null);
@@ -409,7 +433,13 @@ public sealed partial class PlayerPage : Page
     private HlsQuality ResolveQuality(int? height, double? autoRateBytesPerSecond) =>
         height is { } wanted
             ? (hlsQualities.FirstOrDefault(q => q.Height <= wanted) ?? hlsQualities[^1])
-            : HlsVariantParser.AutoQuality(hlsQualities, ScreenHeight(), autoRateBytesPerSecond)!;
+            : HlsVariantParser.AutoQuality(hlsQualities, AutoMaxHeight(), autoRateBytesPerSecond)!;
+
+    /// The height cap for Auto: the screen, and - once a stall downshift has fired for this video -
+    /// the downshifted rung too. Both apply, the lower wins; the rate cap then applies on top inside
+    /// AutoQuality, so the result is the lowest of all three. A ceiling below every rung (a retry
+    /// client with a different ladder) falls through to AutoQuality's lowest-rung fallback.
+    private int AutoMaxHeight() => Math.Min(ScreenHeight(), autoCeilingHeight ?? int.MaxValue);
 
     /// The hand-edited simulated bandwidth (Mbit/s), cached for the life of the page.
     private double? SimulatedMbps()
@@ -494,6 +524,7 @@ public sealed partial class PlayerPage : Page
         host.Opened += () =>
         {
             if (leftPage || host != Player) return;
+            openedAt = DateTimeOffset.UtcNow;
             HideOverlays();
             WakeTransport();
             // The video surface is the page's only always-present, always-in-tree focus owner —
@@ -534,6 +565,7 @@ public sealed partial class PlayerPage : Page
         // property change is the live signal instead.
         host.PausedChanged += paused => { if (host == Player) PlayPauseIcon.Glyph = paused ? "" : ""; };
         host.EndReached += () => { if (host == Player) ReportProgressOnce(); };
+        host.BufferingStarted += () => { if (!leftPage && host == Player) OnBufferingStarted(); };
         host.Errored += message => { if (!leftPage && host == Player) _ = RetryOrFailAsync(message); };
 
         Player = host;
@@ -561,6 +593,82 @@ public sealed partial class PlayerPage : Page
     }
 
     private void TogglePlayPause() => Player?.TogglePause();
+
+    /// The one place PlayerPage asks mpv to seek: stamps lastSeekAt so the stall filter can discount
+    /// the paused-for-cache a seek into an uncached range raises. Every seek the page issues goes
+    /// through here - seek-bar release, the +-10 s accelerators, description timestamp links, the
+    /// sponsor auto-skip and the skip button.
+    private void SeekPlayer(MpvPlayerHost player, double seconds)
+    {
+        lastSeekAt = DateTimeOffset.UtcNow;
+        player.SeekTo(seconds);
+    }
+
+    /// Level 2 of adaptive Auto. A buffering edge only counts as a genuine stall when none of our
+    /// own doing explains it; filters, in order:
+    ///  - reloadArmed: a quality/subtitle/mute reload is in flight, the edge belongs to its load;
+    ///  - !hasPlayed: the first open (and a ladder retry's) has not landed yet;
+    ///  - PostOpenStallGraceSeconds after the latest Opened: an open's own cache fill;
+    ///  - PostOpenStallGraceSeconds after the latest user/sponsor seek (same constant, see tuning).
+    /// And only an adaptive stream under Auto can act on one: a pinned height (preferredHeight set)
+    /// or the muxed fallback (no ladder) never reaches RecordStall.
+    private void OnBufferingStarted()
+    {
+        if (reloadArmed || !hasPlayed) return;
+        if (preferredHeight is not null || hlsMaster is null) return;
+        var now = DateTimeOffset.UtcNow;
+        if (InStallGrace(now, openedAt) || InStallGrace(now, lastSeekAt)) return;
+
+        var window = TimeSpan.FromSeconds(AdaptiveAutoTuning.StallWindowSeconds);
+        while (recordedStalls.Count > 0 && now - recordedStalls.Peek() >= window) recordedStalls.Dequeue();
+        recordedStalls.Enqueue(now);
+
+        switch (downshiftPolicy.RecordStall(now))
+        {
+            case DownshiftDecision.None:
+                break;
+            case DownshiftDecision.Downshift:
+                DownshiftOneRung(now);
+                break;
+            case DownshiftDecision.SuppressedCooldown:
+                LogDownshift("downshift: suppressed (cooldown)");
+                break;
+            case DownshiftDecision.SuppressedCap:
+                LogDownshift("downshift: suppressed (cap)");
+                break;
+        }
+    }
+
+    private static bool InStallGrace(DateTimeOffset now, DateTimeOffset? since) =>
+        since is { } t && (now - t).TotalSeconds < AdaptiveAutoTuning.PostOpenStallGraceSeconds;
+
+    private static void LogDownshift(string line) =>
+        WinTube.Core.Sync.WatchProgressSync.LogTo(Session.DataDirectory, line);
+
+    /// Steps Auto down to the rung below the one playing, for the rest of this video: records the
+    /// ceiling, then reloads through the same mechanic a quality pick uses (ReloadAtCurrentQuality
+    /// re-resolves Auto - now capped - rewrites the manifest, reloads at position and refreshes the
+    /// "Auto - Np" label from activeQuality).
+    private void DownshiftOneRung(DateTimeOffset now)
+    {
+        if (activeQuality is not { } current) return;
+        var index = -1;
+        for (var i = 0; i < hlsQualities.Count; i++)
+            if (hlsQualities[i].Height == current.Height) { index = i; break; }
+        if (index < 0 || index + 1 >= hlsQualities.Count)
+        {
+            LogDownshift("downshift: suppressed (floor)");
+            return;
+        }
+
+        var target = hlsQualities[index + 1];
+        var stalls = recordedStalls.Count;
+        var seconds = (int)Math.Round((now - recordedStalls.Peek()).TotalSeconds);
+        autoCeilingHeight = target.Height;
+        ReloadAtCurrentQuality();
+        // The rung actually loaded: normally the target, lower if the live rate cap bites harder.
+        LogDownshift($"downshift: {stalls} stalls in {seconds}s → {(activeQuality ?? target).Height}p");
+    }
 
     // MARK: transport bar
 
@@ -641,7 +749,7 @@ public sealed partial class PlayerPage : Page
 
     private void OnSeekBarPointerReleased(object sender, PointerRoutedEventArgs e)
     {
-        Player?.SeekTo(SeekBar.Value);
+        if (Player is { } seekPlayer) SeekPlayer(seekPlayer, SeekBar.Value);
         seekBarHeld = false;
         WakeTransport();
     }
@@ -1003,7 +1111,7 @@ public sealed partial class PlayerPage : Page
         // Same clamp-to-duration as the auto-skip path (OnPlayerPosition).
         var duration = p.Duration;
         var target = duration > 0 ? Math.Min(segment.End, duration) : segment.End;
-        p.SeekTo(target);
+        SeekPlayer(p, target);
         // Mirrors OnPlayerPosition's bookkeeping so a rewind back into this segment plays it
         // normally instead of being silently re-skipped.
         sponsorSkipped.Add(segment.Id);
@@ -1028,7 +1136,7 @@ public sealed partial class PlayerPage : Page
         // parks playback at the last frame, which is what "the video is over" looks like.
         var duration = p.Duration;
         var target = duration > 0 ? Math.Min(segment.End, duration) : segment.End;
-        p.SeekTo(target);
+        SeekPlayer(p, target);
         ShowSkipToast($"Skipped {segment.Category.DisplayName()} · {segment.Duration:F0}s");
     }
 
@@ -1073,7 +1181,9 @@ public sealed partial class PlayerPage : Page
         {
             // The next session's first Auto pick is seeded from this one's last rate. A simulated
             // bandwidth is a test override, so the real measurement is neither used nor stored then.
-            if (SimulatedMbps() is null && p.DownloadRateBytesPerSecond is { } rate)
+            // Only after the video has actually played: a failed open leaves a one-sample rate that
+            // would overwrite a good earlier measurement.
+            if (hasPlayed && SimulatedMbps() is null && p.DownloadRateBytesPerSecond is { } rate)
                 App.Session.PlayerSettings.SaveMeasuredBandwidthBps(rate);
             PlayerSlot.Children.Remove(p);
             p.Dispose();
@@ -1543,7 +1653,7 @@ public sealed partial class PlayerPage : Page
                 var seconds = run.Seconds!.Value;
                 var link = new Hyperlink();
                 link.Inlines.Add(new Run { Text = run.Text });
-                link.Click += (_, _) => Player?.SeekTo(seconds);
+                link.Click += (_, _) => { if (Player is { } seekPlayer) SeekPlayer(seekPlayer, seconds); };
                 return link;
             }
             case DescriptionRunKind.Url:
@@ -1894,7 +2004,7 @@ public sealed partial class PlayerPage : Page
     {
         if (Player is not { } p) return;
         args.Handled = true;
-        p.SeekTo(Math.Clamp(p.Position + deltaSeconds, 0, p.Duration));
+        SeekPlayer(p, Math.Clamp(p.Position + deltaSeconds, 0, p.Duration));
         WakeTransport();
     }
 

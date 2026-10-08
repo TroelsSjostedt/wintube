@@ -19,6 +19,13 @@ public static class AdaptiveAutoTuning
     /// Downshifts allowed for one video.
     public const int MaxDownshiftsPerVideo = 2;
 
+    /// Buffering edges are ignored for this long after a file opens (initial load, quality or
+    /// subtitle reload) and after a user-initiated seek (scrub, +-10 s, timestamp link, sponsor skip):
+    /// both routinely raise paused-for-cache without saying anything about the connection's rate.
+    /// One constant serves both windows on purpose; a seek into an uncached range refills about as fast
+    /// as an open does, so a second knob would only be a second number to tune.
+    public const int PostOpenStallGraceSeconds = 5;
+
     /// Half-life of the download-rate exponential moving average.
     public const double RateSmoothingHalfLifeSeconds = 5.0;
 }
