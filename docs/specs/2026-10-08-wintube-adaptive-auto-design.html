@@ -1,0 +1,125 @@
+<title>WinTube Adaptive Auto</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #FAF8F5; --ink: #24211E; --muted: #6B645C; --accent: #A63D2F;
+    --line: #E4DFD8; --card: #FFFFFF; --code-bg: #F1EDE7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+      --line: #35302B; --card: #242019; --code-bg: #262119;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1917; --ink: #E9E4DD; --muted: #A39B90; --accent: #D4674F;
+    --line: #35302B; --card: #242019; --code-bg: #262119;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: "Public Sans", "Segoe UI", system-ui, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; padding: 0 1.25rem 6rem; }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2 { font-family: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; font-weight: 700; margin: 3rem 0 .75rem; }
+  p { margin: .75rem 0; }
+  code, pre { font-family: "IBM Plex Mono", Consolas, monospace; font-size: .85em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  .eyebrow { font-family: "Schibsted Grotesk", sans-serif; font-size: .72rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 3.5rem 0 .25rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; color: var(--muted); font-size: .85rem; margin: 1rem 0 0; padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+  .meta b { color: var(--ink); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: "Schibsted Grotesk", sans-serif; font-size: .78rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: .4rem .75rem .4rem 0; }
+  td { border-bottom: 1px solid var(--line); padding: .55rem .75rem .55rem 0; vertical-align: top; }
+  td:first-child, th:first-child { padding-left: 0; }
+  ul, ol { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  li::marker { color: var(--accent); }
+  .callout { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: .75rem 1rem; margin: 1rem 0; }
+</style>
+
+<main>
+<header>
+  <p class="eyebrow">Design spec · Stage 12 · Approved 2026-10-08</p>
+  <h1>WinTube Adaptive Auto</h1>
+  <p>Auto quality picks what the connection can actually carry, and steps down when playback
+  stalls. Two levels: a rate-informed pick at video start, and a buffering-triggered downshift
+  mid-play — both reusing the reload-at-position machinery, with the measured rate visible in
+  the quality menu and a simulation key for testing.</p>
+  <div class="meta">
+    <span><b>Base</b> WinTube v2.9.0</span>
+    <span><b>Constraint</b> mpv plays one HLS variant; continuous ABR stays out of scope</span>
+  </div>
+</header>
+
+<h2>1 · Rate measurement</h2>
+<ul>
+  <li><code>demuxer-cache-state</code> already carries <code>raw-input-rate</code> (bytes/s).
+  <code>DemuxerCacheState</code> parses it alongside the ranges; <code>MpvPlayerHost</code>
+  exposes a smoothed rate (exponential moving average over ~5 s of the 1 s cache polls,
+  ignoring zero samples while paused/idle).</li>
+  <li>The latest smoothed rate is persisted to <code>settings.json</code>
+  (<code>measuredBandwidthBps</code>) on player teardown, seeding the NEXT session's first
+  pick. No stored rate and no measurement yet → Auto behaves exactly as today (screen height
+  only).</li>
+  <li>Test override: optional <code>simulatedBandwidthMbps</code> in settings.json replaces the
+  measured rate everywhere (pick, display, persistence is skipped while simulating).</li>
+</ul>
+
+<h2>2 · The Auto pick (level 1)</h2>
+<ul>
+  <li>Pure Core function: highest rung whose height ≤ the monitor height (unchanged from
+  today) AND whose <code>BANDWIDTH</code> (bits/s) ≤ rate × 8 × <b>0.7</b>; the rate can only
+  pull the choice DOWN from the screen-based rung, never above it. No usable rate → screen
+  height only. The 0.7 safety factor and all other tunables are named constants in one
+  place.</li>
+  <li>Applied where Auto resolves today: video start and every quality reload. The label stays
+  "Auto · 1080p".</li>
+</ul>
+
+<h2>3 · Stall downshift (level 2)</h2>
+<ul>
+  <li><code>MpvPlayerHost</code> observes mpv's <code>paused-for-cache</code> flag and raises a
+  buffering event on each false→true edge (marshalled like the other events).</li>
+  <li>PlayerPage, only while Auto is active (a manual pin disables all automation):
+  <b>≥2 buffering edges within 60 s</b> → step ONE rung down from the active one via
+  <code>ReloadKeepingPosition</code>. Then a <b>90 s cooldown</b>, at most <b>2 downshifts per
+  video</b>, never below the lowest rung, no upshifts. A downshift also updates the rung used
+  by subsequent Auto resolves for this video.</li>
+  <li>Subtitles, audio-track choice, pause state and position survive the reload (existing
+  machinery); the green buffered ranges show the refetch honestly.</li>
+</ul>
+
+<h2>4 · Visibility &amp; testing</h2>
+<ul>
+  <li><b>Rate in the quality menu:</b> a muted footer line in BOTH quality flyouts (header and
+  transport bar), e.g. "Measured: 42 Mbit/s" — refreshed when the flyout opens; "Simulated:
+  5 Mbit/s" while the override key is set. Out of the way in daily use, one click away in
+  tests.</li>
+  <li><b>Decision log</b> (sync.log, permanent): every Auto resolve logs
+  <code>auto: rate=42Mbps screen=1440 → 1440p</code>; every downshift logs
+  <code>downshift: 2 stalls in 38s → 720p</code>; a suppressed downshift (cooldown/cap) logs
+  once why.</li>
+  <li><b>Manual gate:</b> with <code>simulatedBandwidthMbps</code> at 4 / 25 / 200 the Auto
+  pick lands on the expected rungs (log + label); with a NetLimiter/clumsy cap on the process,
+  a high rung stalls and downshifts within the rules; cooldown and per-video cap respected;
+  manual pin stops the automation; the flyout footer shows the live rate.</li>
+</ul>
+
+<h2>5 · Unchanged / out of scope</h2>
+<ul>
+  <li>Manual quality picks, the subtitle/audio reload threading, buffered-range markers,
+  previews.</li>
+  <li>Out of scope: continuous ABR, upshifting, per-network profiles, a settings UI.</li>
+</ul>
+
+<h2>6 · Testing (automated)</h2>
+<ul>
+  <li>Core TDD: the rate-constrained pick (both constraints, unknown rate, bits/bytes
+  conversion pinned, safety factor), raw-input-rate parsing, EMA smoothing (pure helper),
+  the downshift decision logic (edges-in-window, cooldown, cap, lowest-rung floor) extracted
+  as a pure, clock-injected Core class.</li>
+  <li>Settings round-trips for the two new keys follow the store's existing hostile-file
+  discipline.</li>
+</ul>
+</main>
