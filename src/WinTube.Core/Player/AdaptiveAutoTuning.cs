@@ -32,4 +32,7 @@ public static class AdaptiveAutoTuning
 
     /// Half-life of the download-rate exponential moving average.
     public const double RateSmoothingHalfLifeSeconds = 5.0;
+
+    /// The user doesn't watch below 360p; the downshift floor follows. Rungs under this height are dropped from QualityLevels.
+    public const int MinQualityHeight = 360;
 }

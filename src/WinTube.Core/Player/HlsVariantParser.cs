@@ -40,10 +40,13 @@ public static partial class HlsVariantParser
     /// a missing codec — then SDR VP9 ("vp09.00…", the only family above 1080p), then
     /// whatever remains; ties go to the highest bandwidth (the better audio pairing). When
     /// the machine has no VP9 decoder, pass includeVp9Only: false and the VP9-only heights
-    /// are dropped instead of being offered as guaranteed failures.
+    /// are dropped instead of being offered as guaranteed failures. Heights below
+    /// AdaptiveAutoTuning.MinQualityHeight are dropped entirely, so they never reach the
+    /// picker, Auto's ladder or the downshift floor.
     public static IReadOnlyList<HlsQuality> QualityLevels(
         IReadOnlyList<HlsVariant> variants, bool includeVp9Only = true) =>
         variants
+            .Where(v => v.Height >= AdaptiveAutoTuning.MinQualityHeight)
             .GroupBy(v => v.Height)
             .Select(group => group
                 .OrderByDescending(v => v.Codecs.StartsWith("avc1") ? 2

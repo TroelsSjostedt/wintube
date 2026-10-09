@@ -163,4 +163,52 @@ public class HlsVariantParserTests
         Assert.Equal(2160, HlsVariantParser.AutoQuality(levels, 2160, double.PositiveInfinity)!.Height);
         Assert.Null(HlsVariantParser.AutoQuality([], 2160, 5_000_000));
     }
+
+    // Renditions below 360p are dropped from the quality list, and with it the picker, Auto's
+    // ladder and the downshift floor: the user doesn't watch below 360p. Parse still reads them.
+    private const string ManifestWithSubMinimumRungs = """
+        #EXTM3U
+        #EXT-X-STREAM-INF:BANDWIDTH=28033687,RESOLUTION=3840x2160,FRAME-RATE=60,CODECS="vp09.00.51.08,mp4a.40.2"
+        v2160.m3u8
+        #EXT-X-STREAM-INF:BANDWIDTH=6321284,RESOLUTION=1920x1080,FRAME-RATE=60,CODECS="avc1.64002A,mp4a.40.2"
+        v1080-avc.m3u8
+        #EXT-X-STREAM-INF:BANDWIDTH=801959,RESOLUTION=640x360,CODECS="avc1.4D401E,mp4a.40.2"
+        v360-hi.m3u8
+        #EXT-X-STREAM-INF:BANDWIDTH=300000,RESOLUTION=426x240,CODECS="avc1.4D4015,mp4a.40.2"
+        v240.m3u8
+        #EXT-X-STREAM-INF:BANDWIDTH=100000,RESOLUTION=256x144,CODECS="avc1.4D400B,mp4a.40.2"
+        v144.m3u8
+        """;
+
+    private const string OnlySubMinimumRungsManifest = """
+        #EXTM3U
+        #EXT-X-STREAM-INF:BANDWIDTH=300000,RESOLUTION=426x240,CODECS="avc1.4D4015,mp4a.40.2"
+        v240.m3u8
+        #EXT-X-STREAM-INF:BANDWIDTH=100000,RESOLUTION=256x144,CODECS="avc1.4D400B,mp4a.40.2"
+        v144.m3u8
+        """;
+
+    [Fact]
+    public void QualityLevels_DropsRungsBelow360_KeepsEverythingAtOrAbove()
+    {
+        Assert.Equal(5, HlsVariantParser.Parse(ManifestWithSubMinimumRungs).Count);   // Parse stays unfiltered
+        var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(ManifestWithSubMinimumRungs));
+        Assert.Equal([2160, 1080, 360], levels.Select(l => l.Height));                // 240p and 144p gone
+    }
+
+    [Fact]
+    public void QualityLevels_OnlySubMinimumRungs_YieldsEmpty()
+    {
+        var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(OnlySubMinimumRungsManifest));
+        Assert.Empty(levels);
+        Assert.Null(HlsVariantParser.AutoQuality(levels, 1080));   // empty list -> null, as for any empty input
+    }
+
+    [Fact]
+    public void AutoQuality_StarvedRate_BottomsAt360_NotBelow()
+    {
+        var levels = HlsVariantParser.QualityLevels(HlsVariantParser.Parse(ManifestWithSubMinimumRungs));
+        // 10 kB/s budgets 56 kbit/s, so nothing fits and the lowest kept rung is taken: 360p, not 144p.
+        Assert.Equal(360, HlsVariantParser.AutoQuality(levels, 2160, 10_000)!.Height);
+    }
 }
