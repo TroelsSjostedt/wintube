@@ -111,6 +111,17 @@ public sealed partial class MainWindow : Window
     private void OnRootFrameNavigated(object sender, NavigationEventArgs e)
     {
         Nav.IsBackEnabled = RootFrame.CanGoBack;
+        // Programmatic navigation (search bar, back/forward) doesn't move the pane highlight on
+        // its own, so follow the page. Pages with no menu item (player, channel, login) leave
+        // the selection where it is. Assigning SelectedItem is safe here: the window only
+        // handles ItemInvoked, which fires on user interaction alone, never on assignment.
+        var menuItem = e.SourcePageType == typeof(Views.HomePage) ? HomeItem
+            : e.SourcePageType == typeof(Views.SearchPage) ? SearchItem
+            : e.SourcePageType == typeof(Views.SubscriptionsPage) ? SubscriptionsItem
+            : e.SourcePageType == typeof(Views.HistoryPage) ? HistoryItem
+            : null;
+        if (menuItem is not null && !ReferenceEquals(Nav.SelectedItem, menuItem))
+            Nav.SelectedItem = menuItem;
         // Hidden on PlayerPage (the video owns the window) and on LoginPage (nothing to search
         // while signed out). Collapsed also gives the grid row back to the page.
         SearchBox.Visibility = e.SourcePageType == typeof(Views.PlayerPage) ||
