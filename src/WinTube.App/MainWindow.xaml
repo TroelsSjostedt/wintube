@@ -12,6 +12,9 @@
              "Alt+←" key-tip pops up over the page content on hover. -->
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="Left" Modifiers="Menu" Invoked="OnBackAccelerator"/>
+            <!-- Ctrl+F focuses the global search bar. Same root-scoped, Hidden-placement setup
+                 as Alt+Left above; on PlayerPage the bar is collapsed so the handler no-ops. -->
+            <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnFindAccelerator"/>
         </Grid.KeyboardAccelerators>
         <NavigationView x:Name="Nav" PaneDisplayMode="Left" IsSettingsVisible="False"
                         IsBackButtonVisible="Visible" IsBackEnabled="False"
@@ -42,7 +45,21 @@
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                 </StackPanel>
             </NavigationView.PaneFooter>
-            <Frame x:Name="RootFrame"/>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <!-- Global search bar. A row of its own (not an overlay) so every page shifts down
+                     uniformly; collapsing it (PlayerPage, LoginPage) gives the row back. Stretch +
+                     MaxWidth centres it once the window is wider than the cap. -->
+                <AutoSuggestBox x:Name="SearchBox" Grid.Row="0"
+                                QueryIcon="Find" PlaceholderText="Search"
+                                MaxWidth="640" Margin="24,12,24,12"
+                                HorizontalAlignment="Stretch"
+                                QuerySubmitted="OnSearchSubmitted"/>
+                <Frame x:Name="RootFrame" Grid.Row="1"/>
+            </Grid>
         </NavigationView>
         <InfoBar x:Name="UpdateBar" IsOpen="False" Severity="Success"
                  VerticalAlignment="Top" HorizontalAlignment="Center" Margin="16">

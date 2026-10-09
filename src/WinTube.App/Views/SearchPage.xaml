@@ -6,46 +6,32 @@
     xmlns:local="using:WinTube.App.Views"
     NavigationCacheMode="Required">
     <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <GridView x:Name="ResultsGrid" ItemsSource="{x:Bind results}"
+                      SelectionMode="None" IsItemClickEnabled="False"
+                      Padding="24,0,24,24">
+                <GridView.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <ItemsWrapGrid Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </GridView.ItemsPanel>
+                <GridView.ItemTemplate>
+                    <DataTemplate x:DataType="local:VideoCardViewModel">
+                        <controls:VideoCard Video="{x:Bind Video}"
+                            ProgressFraction="{x:Bind ProgressFraction, Mode=OneWay}"
+                            Clicked="OnVideoCardClicked"
+                            ChannelClicked="OnChannelClicked"/>
+                    </DataTemplate>
+                </GridView.ItemTemplate>
+            </GridView>
+        </ScrollViewer>
 
-        <AutoSuggestBox x:Name="SearchBox" Grid.Row="0"
-                         QueryIcon="Find"
-                         PlaceholderText="Search"
-                         Margin="24,24,24,12"
-                         HorizontalAlignment="Stretch"
-                         QuerySubmitted="OnQuerySubmitted"/>
+        <TextBlock x:Name="EmptyText"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Style="{StaticResource SubtitleTextBlockStyle}"
+                   Visibility="Collapsed"/>
 
-        <Grid Grid.Row="1">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <GridView x:Name="ResultsGrid" ItemsSource="{x:Bind results}"
-                          SelectionMode="None" IsItemClickEnabled="False"
-                          Padding="24,0,24,24">
-                    <GridView.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <ItemsWrapGrid Orientation="Horizontal"/>
-                        </ItemsPanelTemplate>
-                    </GridView.ItemsPanel>
-                    <GridView.ItemTemplate>
-                        <DataTemplate x:DataType="local:VideoCardViewModel">
-                            <controls:VideoCard Video="{x:Bind Video}"
-                                ProgressFraction="{x:Bind ProgressFraction, Mode=OneWay}"
-                                Clicked="OnVideoCardClicked"
-                                ChannelClicked="OnChannelClicked"/>
-                        </DataTemplate>
-                    </GridView.ItemTemplate>
-                </GridView>
-            </ScrollViewer>
-
-            <TextBlock x:Name="EmptyText"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                       Style="{StaticResource SubtitleTextBlockStyle}"
-                       Visibility="Collapsed"/>
-        </Grid>
-
-        <InfoBar x:Name="ErrorBar" Grid.Row="1" Severity="Error" Title="Couldn't search"
+        <InfoBar x:Name="ErrorBar" Severity="Error" Title="Couldn't search"
                  IsOpen="False" VerticalAlignment="Top">
             <InfoBar.ActionButton>
                 <Button Content="Retry" Click="OnRetry"/>

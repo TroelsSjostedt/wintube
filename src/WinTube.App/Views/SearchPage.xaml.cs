@@ -1,15 +1,15 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 using System.Collections.ObjectModel;
-using WinTube.Core.Links;
 using WinTube.Core.Models;
 
 namespace WinTube.App.Views;
 
-/// Search: an AutoSuggestBox above a wrapping GridView of VideoCards. Each submitted query
-/// replaces the current results; empty/whitespace queries are ignored. Never throws past its
-/// own boundary — search errors surface as an inline InfoBar with Retry instead.
+/// Search results: a wrapping GridView of VideoCards for the query MainWindow's global search
+/// bar navigated here with. Each query replaces the current results. Never throws past its own
+/// boundary — search errors surface as an inline InfoBar with Retry instead.
 public sealed partial class SearchPage : Page
 {
     private readonly ObservableCollection<VideoCardViewModel> results = [];
@@ -31,33 +31,21 @@ public sealed partial class SearchPage : Page
 
     // MARK: search
 
-    private async void OnQuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    /// The query behind the results currently shown; MainWindow mirrors it into the global
+    /// search bar when this page is reached without a query of its own.
+    public string? ActiveQuery => lastQuery;
+
+    /// MainWindow's search bar hands the query over as the navigation parameter (it has already
+    /// routed pasted YouTube links to the player), so a string parameter runs immediately. The
+    /// page is cached, so Back/Forward re-deliver the entry's original query: re-run only when
+    /// the results on screen are for a different one. No parameter (nav-menu click) keeps the
+    /// cached results as they are.
+    protected override void OnNavigatedTo(NavigationEventArgs e)
     {
-        try
-        {
-            var query = args.QueryText?.Trim();
-            if (string.IsNullOrWhiteSpace(query)) return;
-
-            if (YouTubeLink.TryParse(query) is { } link)
-            {
-                Frame.Navigate(typeof(PlayerPage), new PlayerRequest(
-                    new VideoItem
-                    {
-                        Id = link.VideoId,
-                        Title = "",
-                        ThumbnailUrl = VideoItem.FallbackThumbnail(link.VideoId),
-                    },
-                    link.StartAt));
-                return;
-            }
-
-            await RunSearchAsync(query);
-        }
-        catch
-        {
-            // OnQuerySubmitted must never throw past this boundary; RunSearchAsync already
-            // routes failures to the InfoBar.
-        }
+        base.OnNavigatedTo(e);
+        if (e.Parameter is not string query || string.IsNullOrWhiteSpace(query)) return;
+        if (e.NavigationMode != NavigationMode.New && query == lastQuery) return;
+        _ = RunSearchAsync(query);
     }
 
     private async Task RunSearchAsync(string query)
@@ -67,6 +55,8 @@ public sealed partial class SearchPage : Page
         try
         {
             var items = await App.Session.RunAsync(t => App.Session.Search.SearchAsync(query, t));
+            // A newer query started while this one was in flight; its results win.
+            if (query != lastQuery) return;
             results.Clear();
             foreach (var item in items) results.Add(new VideoCardViewModel(item));
             App.Session.History.Remember(items);
@@ -76,7 +66,7 @@ public sealed partial class SearchPage : Page
         }
         catch (Exception ex)
         {
-            ShowError(ex.Message);
+            if (query == lastQuery) ShowError(ex.Message);
         }
     }
 

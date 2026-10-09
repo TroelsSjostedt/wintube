@@ -2,6 +2,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Navigation;
 
 namespace WinTube.App;
 
@@ -28,7 +29,7 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "wintube.ico"));
         // The pane's own back arrow is THE back button everywhere; it lights up whenever the
         // frame has somewhere to go back to (player, channel chains, subscriptions drill-ins).
-        RootFrame.Navigated += (_, _) => Nav.IsBackEnabled = RootFrame.CanGoBack;
+        RootFrame.Navigated += OnRootFrameNavigated;
         // Mouse back button (XButton1), app-wide: handledEventsToo so it still fires over the
         // player's own handlers. See OnRootPointerPressed below for why this alone is enough —
         // no Win32-level interception needed.
@@ -103,6 +104,49 @@ public sealed partial class MainWindow : Window
 
     public Frame Frame => RootFrame;
 
+    // MARK: global search bar
+
+    /// Every navigation (forward, back, forward-again) lands here, so the pane's back arrow and
+    /// the search bar can never drift from the page actually showing.
+    private void OnRootFrameNavigated(object sender, NavigationEventArgs e)
+    {
+        Nav.IsBackEnabled = RootFrame.CanGoBack;
+        // Hidden on PlayerPage (the video owns the window) and on LoginPage (nothing to search
+        // while signed out). Collapsed also gives the grid row back to the page.
+        SearchBox.Visibility = e.SourcePageType == typeof(Views.PlayerPage) ||
+                               e.SourcePageType == typeof(Views.LoginPage)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        // On SearchPage the bar mirrors the query behind the results. A string parameter is the
+        // query that just launched (or, on Back/Forward, originally launched) this entry; with
+        // none (nav-menu click) the cached page still shows its last results, so mirror those.
+        if (e.SourcePageType == typeof(Views.SearchPage))
+            SearchBox.Text = e.Parameter as string ??
+                             (RootFrame.Content as Views.SearchPage)?.ActiveQuery ?? "";
+    }
+
+    /// Enter / the magnifier button. A pasted YouTube link opens the player directly; anything
+    /// else is a search, handed to SearchPage as its navigation parameter (it runs on arrival).
+    private void OnSearchSubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        var query = args.QueryText?.Trim();
+        if (string.IsNullOrWhiteSpace(query)) return;
+
+        if (Core.Links.YouTubeLink.TryParse(query) is { } link)
+        {
+            NavigateToPlayer(link.VideoId, link.StartAt);
+            return;
+        }
+        RootFrame.Navigate(typeof(Views.SearchPage), query);
+    }
+
+    /// True when the bar took focus; false when it is collapsed (PlayerPage/LoginPage) and
+    /// Focus() has nothing to land on.
+    private bool FocusSearchBox() => SearchBox.Focus(FocusState.Programmatic);
+
+    private void OnFindAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args) =>
+        args.Handled = FocusSearchBox();
+
     /// Fullscreen video: the window presenter flips and the shell chrome (pane, back arrow)
     /// collapses so the player page is the only thing on screen. Restoring captures whether the
     /// window was maximized going in, so exiting lands back on maximized instead of always
@@ -137,6 +181,12 @@ public sealed partial class MainWindow : Window
             { State: Microsoft.UI.Windowing.OverlappedPresenterState.Minimized } presenter)
             presenter.Restore();
         this.Activate();
+        NavigateToPlayer(videoId, startAt);
+    }
+
+    /// Placeholder VideoItem (id + fallback thumbnail) — the player fills in the rest. Shared by
+    /// OpenVideo (protocol/command-line) and the search bar's pasted-link path.
+    private void NavigateToPlayer(string videoId, TimeSpan? startAt) =>
         RootFrame.Navigate(typeof(Views.PlayerPage), new PlayerRequest(
             new Core.Models.VideoItem
             {
@@ -145,7 +195,6 @@ public sealed partial class MainWindow : Window
                 ThumbnailUrl = Core.Models.VideoItem.FallbackThumbnail(videoId),
             },
             startAt));
-    }
 
     /// Called by LoginPage right after CompleteSignInAsync, before it navigates the frame to
     /// HomePage itself — refreshes the footer and resets the pane highlight to Home.
@@ -172,6 +221,11 @@ public sealed partial class MainWindow : Window
         if (RootFrame.SourcePageType != target) RootFrame.Navigate(target);
         RootFrame.BackStack.Clear();
         Nav.IsBackEnabled = false;
+        // Search lands on the bar, not the page: deferred so it runs after the nav item has
+        // finished taking focus for the click. Also covers clicking Search while already on it
+        // (no Navigated fires then).
+        if (target == typeof(Views.SearchPage))
+            dispatcher.TryEnqueue(DispatcherQueuePriority.Low, () => FocusSearchBox());
     }
 
     private void OnBackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
