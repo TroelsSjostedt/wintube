@@ -9,10 +9,13 @@ namespace WinTube.Core.Player;
 /// for dubbed videos — the HLS manifest declares no default, so the player must select it.
 /// Description is the player response's own videoDetails.shortDescription — present from every
 /// client on the ladder, so it rides along with whichever one ultimately resolves.
+/// Title/Author/ChannelId come from the same videoDetails — the only metadata source when the
+/// player was reached by a pasted link rather than a feed item.
 /// Captions are the player response's subtitle tracks — empty when the video has none.
 public sealed record ResolvedStream(
     Uri Url, ClientKind Client, string UserAgent, bool IsAdaptive, string? OriginalAudioLanguage,
-    string? Description = null, IReadOnlyList<CaptionTrack>? Captions = null)
+    string? Description = null, IReadOnlyList<CaptionTrack>? Captions = null,
+    string? Title = null, string? Author = null, string? ChannelId = null)
 {
     public IReadOnlyList<CaptionTrack> Captions { get; init; } = Captions ?? [];
 }
@@ -118,13 +121,16 @@ public sealed class StreamService(InnerTubeClient innerTube, VisitorDataStore vi
     private static ResolvedStream? Pick(JsonElement json, ClientKind kind, string userAgent)
     {
         var description = Json.StringAt(json, "videoDetails/shortDescription");
+        var title = Json.StringAt(json, "videoDetails/title");
+        var author = Json.StringAt(json, "videoDetails/author");
+        var channelId = Json.StringAt(json, "videoDetails/channelId");
         var captions = ParseCaptions(json);
 
         if (Json.StringAt(json, "streamingData/hlsManifestUrl") is { } hls &&
             Uri.TryCreate(hls, UriKind.Absolute, out var hlsUrl))
             return new ResolvedStream(hlsUrl, kind, userAgent, IsAdaptive: true,
                 OriginalAudioLanguage: OriginalAudioLanguage(json), Description: description,
-                Captions: captions);
+                Captions: captions, Title: title, Author: author, ChannelId: channelId);
 
         var formats = Json.ValueAt(json, "streamingData/formats") is
             { ValueKind: JsonValueKind.Array } arr
@@ -148,7 +154,8 @@ public sealed class StreamService(InnerTubeClient innerTube, VisitorDataStore vi
         return pick is null
             ? null
             : new ResolvedStream(pick, kind, userAgent, IsAdaptive: false,
-                OriginalAudioLanguage: null, Description: description, Captions: captions);
+                OriginalAudioLanguage: null, Description: description, Captions: captions,
+                Title: title, Author: author, ChannelId: channelId);
     }
 
     /// captions.playerCaptionsTracklistRenderer.captionTracks. The name is `runs[0].text` or

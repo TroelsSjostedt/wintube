@@ -387,6 +387,7 @@ public sealed partial class PlayerPage : Page
         // A ladder retry re-enters PlayAsync with a different ResolvedStream (ANDROID carries
         // its own videoDetails too) — just take whatever the latest attempt reports.
         SetDescription(stream.Description);
+        BackfillVideoDetails(stream);
 
         // The persisted preference auto-applies before the first Load, so the first load already
         // carries the subtitle (no reload). persist stays false: re-saving the matched track's
@@ -434,6 +435,25 @@ public sealed partial class PlayerPage : Page
         stallTimer.IsRepeating = false;
         stallTimer.Tick += (_, _) => { if (!hasPlayed) _ = RetryOrFailAsync("Playback did not start."); };
         stallTimer.Start();
+    }
+
+    /// A pasted link or wintube:// launch navigates here with a placeholder VideoItem (empty
+    /// Title) — the resolved stream's videoDetails is the first place the real metadata exists,
+    /// so fill the title row from it. Only the placeholder case: a feed item's own title wins
+    /// over videoDetails, which can differ in casing/trim.
+    private void BackfillVideoDetails(ResolvedStream stream)
+    {
+        if (video!.Title.Length > 0 || string.IsNullOrWhiteSpace(stream.Title)) return;
+        video = video with
+        {
+            Title = stream.Title,
+            Author = stream.Author ?? "",
+            ChannelId = stream.ChannelId,
+        };
+        TitleText.Text = video.Title;
+        var hasChannel = video.ChannelId is not null && video.Author.Length > 0;
+        AuthorLink.Text = hasChannel ? video.Author : "";
+        AuthorLink.Visibility = hasChannel ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// Pure lookup, no side effects — lets SetPreferredHeight check whether a preference change

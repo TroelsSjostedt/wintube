@@ -10,7 +10,9 @@ public class StreamServiceTests
 
     private const string HlsResponse = """
         {"playabilityStatus":{"status":"OK"},
-         "videoDetails":{"shortDescription":"Timestamps: 0:30 intro. See https://example.com for more."},
+         "videoDetails":{"title":"Never Gonna Give You Up","author":"Rick Astley",
+           "channelId":"UCuAXFkgsw1L7xaCfnd5JJOw",
+           "shortDescription":"Timestamps: 0:30 intro. See https://example.com for more."},
          "streamingData":{
            "hlsManifestUrl":"https://manifest.example/master.m3u8",
            "adaptiveFormats":[
@@ -83,6 +85,9 @@ public class StreamServiceTests
         Assert.Equal(ClientKind.VisionOs, stream.Client);
         Assert.Equal("de-DE", stream.OriginalAudioLanguage);
         Assert.Equal("Timestamps: 0:30 intro. See https://example.com for more.", stream.Description);
+        Assert.Equal("Never Gonna Give You Up", stream.Title);
+        Assert.Equal("Rick Astley", stream.Author);
+        Assert.Equal("UCuAXFkgsw1L7xaCfnd5JJOw", stream.ChannelId);
     }
 
     [Fact]
@@ -150,6 +155,9 @@ public class StreamServiceTests
             host => host == "youtubei.googleapis.com" ? Itag18Response : LoginRequired, out _);
         var stream = await service.ResolveAsync("abc");
         Assert.Null(stream.Description);
+        Assert.Null(stream.Title);
+        Assert.Null(stream.Author);
+        Assert.Null(stream.ChannelId);
     }
 
     [Fact]
