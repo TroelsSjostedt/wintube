@@ -63,11 +63,13 @@
                     <AutoSuggestBox x:Name="SearchBox"
                                     QueryIcon="Find" PlaceholderText="Search"
                                     QuerySubmitted="OnSearchSubmitted"/>
-                    <Button Grid.Column="1" Click="OnPasteAndGo"
-                            VerticalAlignment="Stretch"
-                            ToolTipService.ToolTip="Paste &amp; go"
+                    <Button Grid.Column="1" x:Name="PasteGoButton" Click="OnPasteAndGo"
+                            VerticalAlignment="Stretch" IsEnabled="False"
                             AutomationProperties.Name="Paste and go">
-                        <FontIcon Glyph="&#xE77F;" FontSize="16"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon x:Name="PasteGoIcon" Glyph="&#xE77F;" FontSize="16"/>
+                            <TextBlock x:Name="PasteGoLabel" Text="Paste"/>
+                        </StackPanel>
                     </Button>
                 </Grid>
                 <Frame x:Name="RootFrame" Grid.Row="1"/>

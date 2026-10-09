@@ -50,6 +50,11 @@ public sealed partial class MainWindow : Window
         installedVersion = updates.InstalledVersion();
         VersionLink.Text = installedVersion is null ? "dev" : $"v{installedVersion}";
         CheckForUpdatesAsync();
+
+        // ContentChanged fires on a non-UI thread for copies made in other apps — hop over.
+        Windows.ApplicationModel.DataTransfer.Clipboard.ContentChanged += (_, _) =>
+            dispatcher.TryEnqueue(() => _ = UpdatePasteGoStateAsync());
+        _ = UpdatePasteGoStateAsync();
     }
 
     // MARK: version link
@@ -157,8 +162,10 @@ public sealed partial class MainWindow : Window
     }
 
     /// Paste & go: clipboard text runs through RunQuery (a link plays, anything else searches,
-    /// mirrored into the bar first). An empty or non-text clipboard is a silent no-op — and so
-    /// is a transient clipboard-access failure, which lands in the same place by design.
+    /// mirrored into the bar first). The button's reactive state already said which — but the
+    /// clipboard is re-read here, since it can change under a stale state (background copy the
+    /// refresh couldn't read). An empty or non-text clipboard is a silent no-op — and so is a
+    /// transient clipboard-access failure, which lands in the same place by design.
     private async void OnPasteAndGo(object sender, RoutedEventArgs e)
     {
         try
@@ -174,6 +181,45 @@ public sealed partial class MainWindow : Window
         catch
         {
             // Clipboard access denied or raced by another process — the designed no-op.
+        }
+    }
+
+    /// Reactive state for the Paste button: disabled with "Paste" when the clipboard holds no
+    /// text, "Paste & Play" with a play glyph for a YouTube link, "Paste & Search" otherwise.
+    /// Reading the clipboard from the background can fail (access is tied to foreground); then
+    /// the last known state stands and OnActivated refreshes it on the way back in.
+    private async Task UpdatePasteGoStateAsync()
+    {
+        string? text;
+        try
+        {
+            var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+            text = content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text)
+                ? (await content.GetTextAsync())?.Trim()
+                : null;
+        }
+        catch
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            PasteGoButton.IsEnabled = false;
+            PasteGoIcon.Glyph = "";  // Paste
+            PasteGoLabel.Text = "Paste";
+        }
+        else if (Core.Links.YouTubeLink.TryParse(text) is not null)
+        {
+            PasteGoButton.IsEnabled = true;
+            PasteGoIcon.Glyph = "";  // Play
+            PasteGoLabel.Text = "Paste & Play";
+        }
+        else
+        {
+            PasteGoButton.IsEnabled = true;
+            PasteGoIcon.Glyph = "";  // Find
+            PasteGoLabel.Text = "Paste & Search";
         }
     }
 
@@ -286,6 +332,9 @@ public sealed partial class MainWindow : Window
     private void OnActivated(object sender, WindowActivatedEventArgs e)
     {
         if (e.WindowActivationState == WindowActivationState.Deactivated) return;
+        // A copy made while we were in the background may not have been readable from there —
+        // the clipboard is foreground-gated — so the button state is re-checked on the way in.
+        _ = UpdatePasteGoStateAsync();
         var now = DateTimeOffset.UtcNow;
         if (now - lastSyncTrigger <= TimeSpan.FromSeconds(60)) return;
         lastSyncTrigger = now;
