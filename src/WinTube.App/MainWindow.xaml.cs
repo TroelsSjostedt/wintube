@@ -124,7 +124,7 @@ public sealed partial class MainWindow : Window
             Nav.SelectedItem = menuItem;
         // Hidden on PlayerPage (the video owns the window) and on LoginPage (nothing to search
         // while signed out). Collapsed also gives the grid row back to the page.
-        SearchBox.Visibility = e.SourcePageType == typeof(Views.PlayerPage) ||
+        SearchBar.Visibility = e.SourcePageType == typeof(Views.PlayerPage) ||
                                e.SourcePageType == typeof(Views.LoginPage)
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -142,13 +142,39 @@ public sealed partial class MainWindow : Window
     {
         var query = args.QueryText?.Trim();
         if (string.IsNullOrWhiteSpace(query)) return;
+        RunQuery(query);
+    }
 
+    /// The one routing rule for both Enter and Paste & go: link → player, text → SearchPage.
+    private void RunQuery(string query)
+    {
         if (Core.Links.YouTubeLink.TryParse(query) is { } link)
         {
             NavigateToPlayer(link.VideoId, link.StartAt);
             return;
         }
         RootFrame.Navigate(typeof(Views.SearchPage), query);
+    }
+
+    /// Paste & go: clipboard text runs through RunQuery (a link plays, anything else searches,
+    /// mirrored into the bar first). An empty or non-text clipboard is a silent no-op — and so
+    /// is a transient clipboard-access failure, which lands in the same place by design.
+    private async void OnPasteAndGo(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+            if (!content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+                return;
+            var text = (await content.GetTextAsync())?.Trim();
+            if (string.IsNullOrWhiteSpace(text)) return;
+            if (Core.Links.YouTubeLink.TryParse(text) is null) SearchBox.Text = text;
+            RunQuery(text);
+        }
+        catch
+        {
+            // Clipboard access denied or raced by another process — the designed no-op.
+        }
     }
 
     /// True when the bar took focus; false when it is collapsed (PlayerPage/LoginPage) and

@@ -53,11 +53,23 @@
                 <!-- Global search bar. A row of its own (not an overlay) so every page shifts down
                      uniformly; collapsing it (PlayerPage, LoginPage) gives the row back. Stretch +
                      MaxWidth centres it once the window is wider than the cap. -->
-                <AutoSuggestBox x:Name="SearchBox" Grid.Row="0"
-                                QueryIcon="Find" PlaceholderText="Search"
-                                MaxWidth="640" Margin="24,12,24,12"
-                                HorizontalAlignment="Stretch"
-                                QuerySubmitted="OnSearchSubmitted"/>
+                <Grid x:Name="SearchBar" Grid.Row="0"
+                      MaxWidth="640" Margin="24,12,24,12"
+                      HorizontalAlignment="Stretch" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <AutoSuggestBox x:Name="SearchBox"
+                                    QueryIcon="Find" PlaceholderText="Search"
+                                    QuerySubmitted="OnSearchSubmitted"/>
+                    <Button Grid.Column="1" Click="OnPasteAndGo"
+                            VerticalAlignment="Stretch"
+                            ToolTipService.ToolTip="Paste &amp; go"
+                            AutomationProperties.Name="Paste and go">
+                        <FontIcon Glyph="&#xE77F;" FontSize="16"/>
+                    </Button>
+                </Grid>
                 <Frame x:Name="RootFrame" Grid.Row="1"/>
             </Grid>
         </NavigationView>
