@@ -9,10 +9,12 @@ namespace WinTube.Core.Search;
 public sealed class SearchService(InnerTubeClient innerTube)
 {
     public async Task<IReadOnlyList<VideoItem>> SearchAsync(
-        string query, string accessToken, CancellationToken ct = default)
+        string query, string accessToken, SearchFilters? filters = null,
+        CancellationToken ct = default)
     {
-        using var doc = await innerTube.PostAsync("search", ClientKind.Tv,
-            new Dictionary<string, object?> { ["query"] = query },
+        var body = new Dictionary<string, object?> { ["query"] = query };
+        if (filters?.ToParams() is { } p) body["params"] = p;
+        using var doc = await innerTube.PostAsync("search", ClientKind.Tv, body,
             bearer: accessToken, ct: ct);
         return VideoItemParser.Items(doc.RootElement, DateTimeOffset.UtcNow)
             .Where(item => !item.IsShort).ToList();

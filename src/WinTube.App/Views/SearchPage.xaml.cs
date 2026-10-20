@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using System.Collections.ObjectModel;
 using WinTube.Core.Models;
+using WinTube.Core.Search;
 
 namespace WinTube.App.Views;
 
@@ -45,18 +46,61 @@ public sealed partial class SearchPage : Page
         base.OnNavigatedTo(e);
         if (e.Parameter is not string query || string.IsNullOrWhiteSpace(query)) return;
         if (e.NavigationMode != NavigationMode.New && query == lastQuery) return;
+        // A query arriving by navigation is a fresh search — filters start over. The guard
+        // keeps the ComboBoxes' SelectionChanged from firing a duplicate search here.
+        settingFilters = true;
+        DurationFilter.SelectedIndex = 0;
+        UploadDateFilter.SelectedIndex = 0;
+        settingFilters = false;
+        _ = RunSearchAsync(query);
+    }
+
+    // MARK: filters
+
+    /// True while code resets the ComboBoxes, so OnFilterChanged knows the user didn't.
+    private bool settingFilters;
+
+    /// Distinguishes in-flight searches: a filter re-run reuses the same query text, so the
+    /// "newest search wins" guard can't compare queries alone.
+    private int searchSeq;
+
+    /// UI order is Any / Under 4 / 4–20 / Over 20 — note Medium is wire value 3, Long 2.
+    private SearchFilters CurrentFilters => new(
+        UploadDate: UploadDateFilter.SelectedIndex switch
+        {
+            1 => SearchUploadDate.Today,
+            2 => SearchUploadDate.ThisWeek,
+            3 => SearchUploadDate.ThisMonth,
+            4 => SearchUploadDate.ThisYear,
+            _ => null,
+        },
+        Duration: DurationFilter.SelectedIndex switch
+        {
+            1 => SearchDuration.Short,
+            2 => SearchDuration.Medium,
+            3 => SearchDuration.Long,
+            _ => null,
+        });
+
+    private void OnFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (settingFilters || lastQuery is not { } query) return;
         _ = RunSearchAsync(query);
     }
 
     private async Task RunSearchAsync(string query)
     {
+        var seq = ++searchSeq;
         lastQuery = query;
         ErrorBar.IsOpen = false;
         try
         {
-            var items = await App.Session.RunAsync(t => App.Session.Search.SearchAsync(query, t));
-            // A newer query started while this one was in flight; its results win.
-            if (query != lastQuery) return;
+            var filters = CurrentFilters;
+            var items = await App.Session.RunAsync(
+                t => App.Session.Search.SearchAsync(query, t, filters));
+            // A newer search (query or filter change) started while this one was in flight;
+            // its results win.
+            if (seq != searchSeq) return;
             results.Clear();
             foreach (var item in items) results.Add(new VideoCardViewModel(item));
             App.Session.History.Remember(items);
@@ -66,7 +110,7 @@ public sealed partial class SearchPage : Page
         }
         catch (Exception ex)
         {
-            if (query == lastQuery) ShowError(ex.Message);
+            if (seq == searchSeq) ShowError(ex.Message);
         }
     }
 

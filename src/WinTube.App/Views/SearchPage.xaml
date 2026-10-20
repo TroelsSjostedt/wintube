@@ -6,7 +6,35 @@
     xmlns:local="using:WinTube.App.Views"
     NavigationCacheMode="Required">
     <Grid>
-        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Filter bar: the two filters the TV client actually honors (probe 2026-10-09);
+             sort is deliberately absent — the client ignores it. -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="24,0,24,12">
+            <ComboBox x:Name="DurationFilter" SelectionChanged="OnFilterChanged"
+                      MinWidth="150" SelectedIndex="0"
+                      AutomationProperties.Name="Duration filter">
+                <ComboBoxItem Content="Any duration"/>
+                <ComboBoxItem Content="Under 4 min"/>
+                <ComboBoxItem Content="4–20 min"/>
+                <ComboBoxItem Content="Over 20 min"/>
+            </ComboBox>
+            <ComboBox x:Name="UploadDateFilter" SelectionChanged="OnFilterChanged"
+                      MinWidth="150" SelectedIndex="0"
+                      AutomationProperties.Name="Upload date filter">
+                <ComboBoxItem Content="Any time"/>
+                <ComboBoxItem Content="Today"/>
+                <ComboBoxItem Content="This week"/>
+                <ComboBoxItem Content="This month"/>
+                <ComboBoxItem Content="This year"/>
+            </ComboBox>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <GridView x:Name="ResultsGrid" ItemsSource="{x:Bind results}"
                       SelectionMode="None" IsItemClickEnabled="False"
                       Padding="24,0,24,24">
@@ -26,12 +54,12 @@
             </GridView>
         </ScrollViewer>
 
-        <TextBlock x:Name="EmptyText"
+        <TextBlock x:Name="EmptyText" Grid.Row="1"
                    HorizontalAlignment="Center" VerticalAlignment="Center"
                    Style="{StaticResource SubtitleTextBlockStyle}"
                    Visibility="Collapsed"/>
 
-        <InfoBar x:Name="ErrorBar" Severity="Error" Title="Couldn't search"
+        <InfoBar x:Name="ErrorBar" Grid.Row="1" Severity="Error" Title="Couldn't search"
                  IsOpen="False" VerticalAlignment="Top">
             <InfoBar.ActionButton>
                 <Button Content="Retry" Click="OnRetry"/>
