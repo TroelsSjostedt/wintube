@@ -1,8 +1,11 @@
 # Fetches the pinned libmpv build WinTube links against and unpacks libmpv-2.dll
-# into libs/mpv/ (gitignored). Upgrading mpv = change $Url and $Sha256 together.
+# into libs/mpv/ (gitignored). The archive is OUR mirror of an upstream
+# zhongfly/mpv-winbuild build (upstream prunes old releases) — upgrading mpv =
+# playback-test the new build, run tools/mirror-libmpv.ps1 on the upstream URL,
+# then change $Url and $Sha256 together to what it prints.
 $ErrorActionPreference = "Stop"
 
-$Url = "https://github.com/zhongfly/mpv-winbuild/releases/download/2026-11-03-8ca245f213/mpv-dev-x86_64-20261103-git-8ca245f213.7z"
+$Url = "https://github.com/TroelsSjostedt/wintube/releases/download/libmpv/mpv-dev-x86_64-20261103-git-8ca245f213.7z"
 $Sha256 = "CC4A030DC9C3F17763C6898DF644F304651C83AD7ECAF732B8972741C5A5B7FC"
 
 $root = Split-Path $PSScriptRoot -Parent
