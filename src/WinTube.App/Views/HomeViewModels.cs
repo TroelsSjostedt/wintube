@@ -31,7 +31,9 @@ public sealed class ShelfViewModel
         Title = section.Title;
         IsShorts = section.IsShorts;
         Continuation = section.Continuation;
-        foreach (var item in section.Items) Items.Add(new VideoCardViewModel(item));
+        var inContinueWatching = section.Title == WinTube.Core.Stores.ContinueWatchingBuilder.Title;
+        foreach (var item in section.Items)
+            Items.Add(new VideoCardViewModel(item) { InContinueWatching = inContinueWatching });
     }
 
     /// Shapes a continuation page's items to what this row shows - see FeedSection.Admitting.
@@ -43,6 +45,9 @@ public sealed class ShelfViewModel
 public sealed class VideoCardViewModel(VideoItem video) : INotifyPropertyChanged
 {
     public VideoItem Video { get; } = video;
+
+    /// Set only by Home's Continue watching shelf; gates the card's remove-from-row menu item.
+    public bool InContinueWatching { get; init; }
 
     private double progressFraction;
     public double ProgressFraction

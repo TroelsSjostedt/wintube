@@ -89,7 +89,8 @@ public sealed class FeedService(InnerTubeClient innerTube)
     /// `localRow`, when given, is a row the caller built from on-device state; it lands right
     /// after Home's lead (directly below "Recommended"), ahead of the subscriptions rows.
     public async Task<CompositeHomePage> LoadCompositeHomeAsync(
-        string accessToken, FeedSection? localRow = null, CancellationToken ct = default)
+        string accessToken, FeedSection? localRow = null, FeedSection? myListRow = null,
+        CancellationToken ct = default)
     {
         var homeTask = LoadHomeAsync(accessToken, ct);
         var subscriptionsTask = Quietly(LoadSubscriptionsFeedAsync(accessToken, ct));
@@ -108,6 +109,8 @@ public sealed class FeedService(InnerTubeClient innerTube)
         if (localRow is not null) composed.Add((localRow, false));
         if (subscriptions is not null)
             composed.AddRange(subscriptions.Sections.Select(s => (s, false)));
+        // My list sits between the subscriptions block and the rest of Home (user's placement).
+        if (myListRow is not null) composed.Add((myListRow, false));
         composed.AddRange(home.Sections.Skip(leadCount).Select(s => (s, false)));
         if (history is not null)
             composed.AddRange(history.Sections.Select(s => (s, true)));

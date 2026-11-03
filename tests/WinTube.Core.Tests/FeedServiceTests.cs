@@ -370,4 +370,22 @@ public class FeedServiceTests
         Assert.Equal("local", page.Sections[2].Id);
         Assert.Equal(1, page.HistoryRowCount);   // the local row is not a history row
     }
+
+    [Fact]
+    public async Task CompositeHome_MyListRowSitsBetweenSubscriptionsAndTheRestOfHome()
+    {
+        var feed = MakeRouted(new()
+        {
+            ["default"] = SectionList(
+                Shelf("Recommended", Tile("h1")), Shelf("New to you", Tile("h2"))),
+            ["FEsubscriptions"] = SectionList(Shelf("Today", Tile("s9"))),
+            ["FEhistory"] = SectionList(Shelf("x", Tile("w1"))),
+        });
+        var cw = new FeedSection("cw", "Continue watching", [new VideoItem { Id = "c1", Title = "c" }], null, false);
+        var myList = new FeedSection("ml", "My list", [new VideoItem { Id = "m1", Title = "m" }], null, false);
+        var page = await feed.LoadCompositeHomeAsync("T", cw, myList);
+        Assert.Equal(
+            ["Recommended", "Continue watching", "From your subscriptions", "My list", "New to you", "History"],
+            page.Sections.Select(s => s.Title));
+    }
 }

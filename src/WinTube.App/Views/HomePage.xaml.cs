@@ -31,11 +31,17 @@ public sealed partial class HomePage : Page
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         App.Session.Progress.Changed += OnProgressChanged;
+        App.Session.MyList.Changed += OnMyListChanged;
+        App.Session.CwDismissals.Changed += OnCwDismissed;
         await LoadHomeAsync();
     }
 
-    private void OnUnloaded(object sender, RoutedEventArgs e) =>
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
         App.Session.Progress.Changed -= OnProgressChanged;
+        App.Session.MyList.Changed -= OnMyListChanged;
+        App.Session.CwDismissals.Changed -= OnCwDismissed;
+    }
 
     // MARK: loading
 
@@ -45,7 +51,9 @@ public sealed partial class HomePage : Page
         try
         {
             var localRow = ContinueWatchingRow();
-            var page = await App.Session.RunAsync(t => App.Session.Feed.LoadCompositeHomeAsync(t, localRow));
+            var myListRow = MyListRow();
+            var page = await App.Session.RunAsync(
+                t => App.Session.Feed.LoadCompositeHomeAsync(t, localRow, myListRow));
             shelves.Clear();
             foreach (var section in page.Sections) shelves.Add(new ShelfViewModel(section));
             historyRowCount = page.HistoryRowCount;
@@ -68,12 +76,50 @@ public sealed partial class HomePage : Page
         try
         {
             return ContinueWatchingBuilder.Row(
-                App.Session.History.WatchedHere, App.Session.Progress.Entries, App.Session.History.Card);
+                App.Session.History.WatchedHere, App.Session.Progress.Entries,
+                App.Session.History.Card, App.Session.CwDismissals.Entries);
         }
         catch
         {
             return null;
         }
+    }
+
+    public const string MyListTitle = "My list";
+
+    /// The local "My list" row, or null when the list is empty (the row is omitted, like
+    /// Continue watching). Shorts are kept out of the landscape row but stay on the list.
+    private static FeedSection? MyListRow()
+    {
+        var items = App.Session.MyList.Items.Where(v => !v.IsShort).ToList();
+        return items.Count == 0
+            ? null
+            : new FeedSection(Guid.NewGuid().ToString("N"), MyListTitle, items, null, IsShorts: false);
+    }
+
+    // MARK: local-row live refresh
+
+    private void OnMyListChanged() => RefreshLocalRow(MyListTitle, MyListRow());
+
+    private void OnCwDismissed() => RefreshLocalRow(ContinueWatchingBuilder.Title, ContinueWatchingRow());
+
+    /// Replaces (or removes) a local row's shelf in place after its store changed. A row not
+    /// currently shown is NOT inserted — its position depends on the composite stitch, so it
+    /// appears on the next full Home load instead.
+    private void RefreshLocalRow(string title, FeedSection? section)
+    {
+        var index = -1;
+        for (var i = 0; i < shelves.Count; i++)
+            if (shelves[i].Title == title) { index = i; break; }
+        if (index < 0) return;
+        if (section is null)
+        {
+            shelves.RemoveAt(index);
+            return;
+        }
+        var shelf = new ShelfViewModel(section);
+        shelves[index] = shelf;
+        RefreshProgress(shelf.Items);
     }
 
     private async void OnLoadMoreShelves(object sender, RoutedEventArgs e)

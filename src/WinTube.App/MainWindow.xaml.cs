@@ -123,6 +123,7 @@ public sealed partial class MainWindow : Window
         var menuItem = e.SourcePageType == typeof(Views.HomePage) ? HomeItem
             : e.SourcePageType == typeof(Views.SearchPage) ? SearchItem
             : e.SourcePageType == typeof(Views.SubscriptionsPage) ? SubscriptionsItem
+            : e.SourcePageType == typeof(Views.MyListPage) ? MyListItem
             : e.SourcePageType == typeof(Views.HistoryPage) ? HistoryItem
             : null;
         if (menuItem is not null && !ReferenceEquals(Nav.SelectedItem, menuItem))
@@ -298,6 +299,7 @@ public sealed partial class MainWindow : Window
         {
             "Search" => typeof(Views.SearchPage),
             "Subscriptions" => typeof(Views.SubscriptionsPage),
+            "MyList" => typeof(Views.MyListPage),
             "History" => typeof(Views.HistoryPage),
             _ => typeof(Views.HomePage),
         };

@@ -1004,6 +1004,8 @@ public sealed partial class PlayerPage : Page
         TransportBar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         if (!visible) SeekHoverBubble.Visibility = Visibility.Collapsed;
         ProtectedCursor = visible ? InputSystemCursor.Create(InputSystemCursorShape.Arrow) : null;
+        // Subtitles sit at mpv's bottom default, which the bar covers — lift them with it.
+        if (Player is { } player) player.SubtitleLifted = visible;
     }
 
     // MARK: progress

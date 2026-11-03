@@ -115,6 +115,22 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         }
     }
 
+    /// True lifts the subtitle clear of the transport bar (sub-pos; 100 = mpv's bottom
+    /// default). Session state like SubtitleVisible: survives loads, applied by CreateMpv
+    /// when set before the pipeline is Live.
+    public bool SubtitleLifted
+    {
+        get => subtitleLifted;
+        set
+        {
+            subtitleLifted = value;
+            if (Live) ApplySubtitlePosition();
+        }
+    }
+
+    /// Tuned by eye against the transport bar's height at typical window sizes.
+    private const double LiftedSubPos = 82;
+
     // Dispose hands the handle to the teardown thread, so the UI must stop using it the moment
     // `disposed` is set, not when `mpv` is finally zeroed over there.
     private bool Live => !disposed && mpv != IntPtr.Zero;
@@ -130,6 +146,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
     private PendingLoad? pendingLoad;
     private double volume = 1.0, speed = 1.0;
     private bool subtitleVisible = true;
+    private bool subtitleLifted;
     private bool eofReached; // edge-detects eof-reached false->true; event thread only
     private bool pausedForCache; // edge-detects paused-for-cache false->true; event thread only
 
@@ -372,6 +389,7 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         MpvNative.SetPropertyDouble(mpv, "volume", volume * 100);
         MpvNative.SetPropertyDouble(mpv, "speed", speed);
         ApplySubtitleVisibility();
+        ApplySubtitlePosition();
         MpvNative.mpv_observe_property(mpv, PosUserdata, Utf8("time-pos"), MpvNative.FormatDouble);
         MpvNative.mpv_observe_property(mpv, DurUserdata, Utf8("duration"), MpvNative.FormatDouble);
         MpvNative.mpv_observe_property(mpv, PauseUserdata, Utf8("pause"), MpvNative.FormatFlag);
@@ -386,6 +404,9 @@ public sealed class MpvPlayerHost : Grid, IDisposable
 
     private void ApplySubtitleVisibility() =>
         MpvNative.Command(mpv, "set", "sub-visibility", subtitleVisible ? "yes" : "no");
+
+    private void ApplySubtitlePosition() =>
+        MpvNative.SetPropertyDouble(mpv, "sub-pos", subtitleLifted ? LiftedSubPos : 100);
 
     private static byte[] Utf8(string s) => Encoding.UTF8.GetBytes(s + "\0");
 

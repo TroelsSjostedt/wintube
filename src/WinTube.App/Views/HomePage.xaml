@@ -37,6 +37,7 @@
                                         <DataTemplate x:DataType="local:VideoCardViewModel">
                                             <controls:VideoCard Video="{x:Bind Video}"
                                                 ProgressFraction="{x:Bind ProgressFraction, Mode=OneWay}"
+                                                InContinueWatching="{x:Bind InContinueWatching}"
                                                 Clicked="OnVideoCardClicked"
                                                 ChannelClicked="OnChannelClicked"/>
                                         </DataTemplate>

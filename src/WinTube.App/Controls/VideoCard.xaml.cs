@@ -29,6 +29,18 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
         nameof(ProgressFraction), typeof(double), typeof(VideoCard),
         new PropertyMetadata(0.0, OnProgressFractionChanged));
 
+    /// True only for cards sitting in Home's Continue watching row — gates the context menu's
+    /// "Remove from Continue watching" item (user's call: shown nowhere else).
+    public static readonly DependencyProperty InContinueWatchingProperty = DependencyProperty.Register(
+        nameof(InContinueWatching), typeof(bool), typeof(VideoCard),
+        new PropertyMetadata(false));
+
+    public bool InContinueWatching
+    {
+        get => (bool)GetValue(InContinueWatchingProperty);
+        set => SetValue(InContinueWatchingProperty, value);
+    }
+
     public VideoItem? Video
     {
         get => (VideoItem?)GetValue(VideoProperty);
@@ -128,6 +140,31 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
     private async void OnGoToChannel(object sender, RoutedEventArgs e)
     {
         if (Video is { } video) await ActivateChannelAsync(video);
+    }
+
+    // MARK: My list / Continue watching menu
+
+    /// Membership can change between opens (another card toggled it), so the label is
+    /// decided per open, not at render time.
+    private void OnMenuOpening(object sender, object e)
+    {
+        if (Video is not { } video) return;
+        MyListItem.Text = App.Session.MyList.Contains(video.Id)
+            ? "Remove from My list" : "Add to My list";
+        RemoveCwItem.Visibility = InContinueWatching ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// Mutates the store only — the Home row and My list page react to MyList.Changed.
+    private void OnMyListToggle(object sender, RoutedEventArgs e)
+    {
+        if (Video is not { } video) return;
+        if (App.Session.MyList.Contains(video.Id)) App.Session.MyList.Remove(video.Id);
+        else App.Session.MyList.Add(video);
+    }
+
+    private void OnRemoveFromContinueWatching(object sender, RoutedEventArgs e)
+    {
+        if (Video is { } video) App.Session.CwDismissals.Dismiss(video.Id);
     }
 
     /// True while a lazy channel-id resolve is in flight, so a second activation (double-click,

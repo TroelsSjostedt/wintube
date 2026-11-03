@@ -19,11 +19,16 @@ public static class ContinueWatchingBuilder
     public static IReadOnlyList<(VideoItem Video, double Fraction)> Build(
         IReadOnlyList<(string Id, DateTimeOffset WatchedAt)> watched,
         IReadOnlyDictionary<string, ProgressEntry> progress,
-        Func<string, VideoItem?> card)
+        Func<string, VideoItem?> card,
+        IReadOnlyDictionary<string, DateTimeOffset>? dismissed = null)
     {
         var result = new List<(VideoItem, double)>();
-        foreach (var (id, _) in watched.OrderByDescending(w => w.WatchedAt))
+        foreach (var (id, watchedAt) in watched.OrderByDescending(w => w.WatchedAt))
         {
+            // Dismissed, and not watched again since — hidden, position kept. A later watch
+            // moves WatchedAt past the dismissal and the video re-enters on its own.
+            if (dismissed is not null && dismissed.TryGetValue(id, out var dismissedAt) &&
+                dismissedAt >= watchedAt) continue;
             if (!progress.TryGetValue(id, out var entry) || entry.DurationSeconds <= 0) continue;
             var fraction = entry.PositionSeconds / entry.DurationSeconds;
             if (fraction <= 0 || fraction >= FinishedFraction) continue;
@@ -40,9 +45,10 @@ public static class ContinueWatchingBuilder
     public static FeedSection? Row(
         IReadOnlyList<(string Id, DateTimeOffset WatchedAt)> watched,
         IReadOnlyDictionary<string, ProgressEntry> progress,
-        Func<string, VideoItem?> card)
+        Func<string, VideoItem?> card,
+        IReadOnlyDictionary<string, DateTimeOffset>? dismissed = null)
     {
-        var videos = Build(watched, progress, card);
+        var videos = Build(watched, progress, card, dismissed);
         return videos.Count == 0
             ? null
             : new FeedSection(

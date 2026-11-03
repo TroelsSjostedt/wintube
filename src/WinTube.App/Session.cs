@@ -35,6 +35,8 @@ public sealed class Session
     public WatchProgressStore Progress { get; } = new(DataDirectory);
     public PlayerSettingsStore PlayerSettings { get; } = new(DataDirectory);
     public WatchHistoryStore History { get; } = new(DataDirectory);
+    public MyListStore MyList { get; } = new(DataDirectory);
+    public ContinueWatchingDismissals CwDismissals { get; } = new(DataDirectory);
     public WatchProgressSync? ProgressSync { get; }
 
     public StoredProfile? Profile { get; private set; }
@@ -140,6 +142,8 @@ public sealed class Session
     {
         Progress.Activate(Profile?.ProfileId);
         History.Activate(Profile?.ProfileId);
+        MyList.Activate(Profile?.ProfileId);
+        CwDismissals.Activate(Profile?.ProfileId);
     }
 
     private void ActivateSync() =>

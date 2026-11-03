@@ -11,8 +11,11 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid.ContextFlyout>
-            <MenuFlyout>
+            <MenuFlyout Opening="OnMenuOpening">
                 <MenuFlyoutItem x:Name="GoToChannelItem" Text="Go to channel" Click="OnGoToChannel"/>
+                <MenuFlyoutItem x:Name="MyListItem" Text="Add to My list" Click="OnMyListToggle"/>
+                <MenuFlyoutItem x:Name="RemoveCwItem" Text="Remove from Continue watching"
+                                Click="OnRemoveFromContinueWatching" Visibility="Collapsed"/>
             </MenuFlyout>
         </Grid.ContextFlyout>
 

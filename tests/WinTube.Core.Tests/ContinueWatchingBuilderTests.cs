@@ -89,6 +89,22 @@ public class ContinueWatchingBuilderTests
     }
 
     [Fact]
+    public void Build_SkipsDismissed_UntilWatchedAgainAfterDismissal()
+    {
+        var watched = new List<(string, DateTimeOffset)> { ("gone", T(30)), ("back", T(10)), ("kept", T(5)) };
+        var progress = Progress(("gone", 30, 300), ("back", 30, 300), ("kept", 30, 300));
+        // "gone" dismissed after its last watch → hidden; "back" dismissed but watched again
+        // later → shown; "kept" never dismissed.
+        var dismissed = new Dictionary<string, DateTimeOffset>
+        {
+            ["gone"] = T(20),
+            ["back"] = T(15),
+        };
+        var result = ContinueWatchingBuilder.Build(watched, progress, AllCards, dismissed);
+        Assert.Equal(["kept", "back"], result.Select(r => r.Video.Id));
+    }
+
+    [Fact]
     public void Row_IsNullWhenNothingQualifies_AndOtherwiseANamedNonShortsSection()
     {
         Assert.Null(ContinueWatchingBuilder.Row([], Progress(), AllCards));
