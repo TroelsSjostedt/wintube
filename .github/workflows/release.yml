@@ -16,6 +16,26 @@ jobs:
         run: dotnet test tests/WinTube.Core.Tests
       - name: Fetch libmpv
         run: pwsh tools/get-libmpv.ps1
+      # Non-blocking: the release ships the tested pin regardless; a warning here means
+      # "schedule a libmpv bump (+ playback test) as the next task".
+      - name: Check libmpv pin freshness
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          try {
+            $pin = [regex]::Match((Get-Content tools/get-libmpv.ps1 -Raw), 'mpv-dev-x86_64-(\d{8})-git').Groups[1].Value
+            $latestTag = gh api repos/zhongfly/mpv-winbuild/releases/latest --jq .tag_name
+            $latest = ($latestTag.Substring(0, 10) -replace '-', '')
+            if ([int]$latest -gt [int]$pin) {
+              $days = ([datetime]::ParseExact($latest, 'yyyyMMdd', $null) - [datetime]::ParseExact($pin, 'yyyyMMdd', $null)).Days
+              Write-Output "::warning title=libmpv pin is $days days behind::Pinned $pin, upstream latest is $latestTag. Bump tools/get-libmpv.ps1 (and re-mirror) after a local playback test."
+            } else {
+              Write-Output "libmpv pin $pin is current (upstream $latestTag)."
+            }
+          } catch {
+            Write-Output "::warning title=libmpv freshness check failed::$($_.Exception.Message)"
+          }
       - name: Publish
         run: >
           dotnet publish src/WinTube.App -c Release -p:Platform=x64 -r win-x64
