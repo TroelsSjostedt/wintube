@@ -220,6 +220,28 @@ public class FeedServiceTests
         Assert.Equal(["v1"], results.Select(i => i.Id));
     }
 
+    /// The TV search response carries extra shelves after the results — "Previously watched"
+    /// (the user's own history matching the query, which YouTube does NOT apply search filters
+    /// to) and "Shorts". Only the first video-bearing shelf is the search results.
+    [Fact]
+    public async Task Search_TakesOnlyTheFirstVideoBearingShelf()
+    {
+        static string Shelf(string title, string tiles) =>
+            "{\"shelfRenderer\":{" +
+            "\"headerRenderer\":{\"shelfHeaderRenderer\":{\"avatarLockup\":{\"avatarLockupRenderer\":{" +
+            "\"title\":{\"simpleText\":\"" + title + "\"}}}}}," +
+            "\"content\":{\"horizontalListRenderer\":{\"items\":[" + tiles + "]}}}}";
+
+        var json = "{\"contents\":{\"sectionListRenderer\":{\"contents\":[" +
+            Shelf("Ads", "") + "," +
+            Shelf("Search results for q", Tile("v1") + "," + Tile("v2")) + "," +
+            Shelf("Previously watched", Tile("old1") + "," + Tile("old2")) + "]}}}";
+
+        var (_, search) = Make(json);
+        var results = await search.SearchAsync("q", "T");
+        Assert.Equal(["v1", "v2"], results.Select(i => i.Id));
+    }
+
     [Fact]
     public async Task SubscriptionsFeed_FoldsAndRetitles_LeavingShortsAlone()
     {

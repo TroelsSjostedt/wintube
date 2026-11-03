@@ -46,19 +46,12 @@ public sealed partial class SearchPage : Page
         base.OnNavigatedTo(e);
         if (e.Parameter is not string query || string.IsNullOrWhiteSpace(query)) return;
         if (e.NavigationMode != NavigationMode.New && query == lastQuery) return;
-        // A query arriving by navigation is a fresh search — filters start over. The guard
-        // keeps the ComboBoxes' SelectionChanged from firing a duplicate search here.
-        settingFilters = true;
-        DurationFilter.SelectedIndex = 0;
-        UploadDateFilter.SelectedIndex = 0;
-        settingFilters = false;
+        // Filters deliberately survive a new query — refining by duration/date and then
+        // rewording the search is one flow, not two (user's call, 2026-11-03).
         _ = RunSearchAsync(query);
     }
 
     // MARK: filters
-
-    /// True while code resets the ComboBoxes, so OnFilterChanged knows the user didn't.
-    private bool settingFilters;
 
     /// Distinguishes in-flight searches: a filter re-run reuses the same query text, so the
     /// "newest search wins" guard can't compare queries alone.
@@ -84,7 +77,7 @@ public sealed partial class SearchPage : Page
 
     private void OnFilterChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (settingFilters || lastQuery is not { } query) return;
+        if (lastQuery is not { } query) return;
         _ = RunSearchAsync(query);
     }
 
