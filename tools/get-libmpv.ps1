@@ -2,8 +2,8 @@
 # into libs/mpv/ (gitignored). Upgrading mpv = change $Url and $Sha256 together.
 $ErrorActionPreference = "Stop"
 
-$Url = "https://github.com/zhongfly/mpv-winbuild/releases/download/2026-09-22-c646756799/mpv-dev-x86_64-20260922-git-c646756799.7z"
-$Sha256 = "4D078FF1F6FE68B0CC1D13D78AD96E5194E30EFCEB4256441EAEDC43A2D692C0"
+$Url = "https://github.com/zhongfly/mpv-winbuild/releases/download/2026-11-03-8ca245f213/mpv-dev-x86_64-20261103-git-8ca245f213.7z"
+$Sha256 = "CC4A030DC9C3F17763C6898DF644F304651C83AD7ECAF732B8972741C5A5B7FC"
 
 $root = Split-Path $PSScriptRoot -Parent
 $dest = Join-Path $root "libs/mpv"
