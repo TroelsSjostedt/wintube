@@ -107,10 +107,18 @@ public sealed class FeedService(InnerTubeClient innerTube)
         var composed = new List<(FeedSection Section, bool IsHistory)>();
         composed.AddRange(home.Sections.Take(leadCount).Select(s => (s, false)));
         if (localRow is not null) composed.Add((localRow, false));
-        if (subscriptions is not null)
-            composed.AddRange(subscriptions.Sections.Select(s => (s, false)));
-        // My list sits between the subscriptions block and the rest of Home (user's placement).
-        if (myListRow is not null) composed.Add((myListRow, false));
+        // My list sits between the subscriptions videos and the Shorts row (user's placement):
+        // the subscriptions feed often carries its own Shorts row, and My list goes ABOVE it —
+        // otherwise right after the subscriptions block.
+        var subSections = subscriptions?.Sections ?? [];
+        var subShorts = subSections.ToList().FindIndex(s => s.IsShorts);
+        var myListAt = subShorts >= 0 ? subShorts : subSections.Count;
+        for (var i = 0; i < subSections.Count; i++)
+        {
+            if (i == myListAt && myListRow is not null) composed.Add((myListRow, false));
+            composed.Add((subSections[i], false));
+        }
+        if (myListAt == subSections.Count && myListRow is not null) composed.Add((myListRow, false));
         composed.AddRange(home.Sections.Skip(leadCount).Select(s => (s, false)));
         if (history is not null)
             composed.AddRange(history.Sections.Select(s => (s, true)));

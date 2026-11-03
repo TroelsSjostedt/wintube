@@ -128,8 +128,9 @@ public sealed class MpvPlayerHost : Grid, IDisposable
         }
     }
 
-    /// Tuned by eye against the transport bar's height at typical window sizes.
-    private const double LiftedSubPos = 82;
+    /// Tuned by eye against the transport bar's height at typical window sizes (82 pushed
+    /// the text visibly too high — user feedback 2026-11-03).
+    private const double LiftedSubPos = 92;
 
     // Dispose hands the handle to the teardown thread, so the UI must stop using it the moment
     // `disposed` is set, not when `mpv` is finally zeroed over there.
