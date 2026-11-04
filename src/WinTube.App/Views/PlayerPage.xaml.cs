@@ -137,6 +137,7 @@ public sealed partial class PlayerPage : Page
 
     private IReadOnlyList<SponsorSegment> sponsorSegments = [];
     private readonly HashSet<string> sponsorSkipped = [];
+    private IReadOnlyList<Chapter> chapters = [];
     private DispatcherQueueTimer? toastTimer;
     /// Duration RenderSponsorMarkers last drew against — UpdateTransport compares against this
     /// on every PositionChanged tick so a rebuild only happens once duration actually changes
@@ -149,6 +150,8 @@ public sealed partial class PlayerPage : Page
         new(Windows.UI.Color.FromArgb(179, 0xE6, 0xC2, 0x1F));   // ~70% opacity caution yellow
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush BufferedRangeBrush =
         new(Windows.UI.Color.FromArgb(0xCC, 0x4C, 0xAF, 0x50));  // green, clearly distinct from track and markers
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush ChapterTickBrush =
+        new(Windows.UI.Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF));  // near-white, readable over fill + overlays
     /// Cached result of GetThumbInset() — set once the live Thumb part has a real ActualWidth.
     private double? thumbInset;
 
@@ -263,6 +266,7 @@ public sealed partial class PlayerPage : Page
         toastTimer?.Stop();
         sponsorSegments = [];
         sponsorSkipped.Clear();
+        chapters = [];
         ClearSponsorMarkers();
 
         commentsCts?.Cancel();
@@ -590,6 +594,7 @@ public sealed partial class PlayerPage : Page
                 App.Session.History.Record(video!);
                 StartProgressTimer();
                 _ = LoadSponsorSegmentsAsync();
+                _ = LoadChaptersAsync();
             }
             // M5: DoLoad's pause=no has already landed by the time Opened fires, so re-pausing
             // here (rather than right after Load()) can't race mpv's own command queue.
@@ -767,6 +772,7 @@ public sealed partial class PlayerPage : Page
             markersDuration = p.Duration;
             RenderSponsorMarkers();
             RenderBufferedRanges();
+            RenderChapterMarkers();
         }
     }
 
@@ -802,6 +808,9 @@ public sealed partial class PlayerPage : Page
 
         var time = Math.Clamp((x - inset) / span, 0, 1) * duration;
         SeekHoverText.Text = Fmt(time, duration);
+        var chapter = ChapterService.At(chapters, TimeSpan.FromSeconds(time));
+        SeekHoverChapter.Text = chapter?.Title ?? "";
+        SeekHoverChapter.Visibility = chapter is null ? Visibility.Collapsed : Visibility.Visible;
         SeekHoverBubble.Visibility = Visibility.Visible;
         SeekHoverBubble.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
         var size = SeekHoverBubble.DesiredSize;
@@ -1039,6 +1048,39 @@ public sealed partial class PlayerPage : Page
         RenderSponsorMarkers();
     }
 
+    // MARK: chapters
+
+    /// Fired alongside LoadSponsorSegmentsAsync after playback has started, so a slow /next
+    /// response can never delay the first frame. A video without chapters (or a failed fetch)
+    /// just leaves the list empty — no ticks, no Ctrl-jumps, no hover title.
+    private async Task LoadChaptersAsync()
+    {
+        IReadOnlyList<Chapter> result;
+        try { result = await App.Session.Chapters.GetAsync(video!.Id); }
+        catch (Exception e) when (e is InnerTubeException or HttpRequestException) { return; }
+        if (leftPage || result.Count == 0) return;
+        chapters = result;
+        RenderChapterMarkers();
+    }
+
+    /// Chapter boundary ticks over SeekBar — one 2 px near-white tick per chapter start, the
+    /// first chapter's 0:00 skipped (a tick at the track edge marks nothing). Same mapping and
+    /// rebuild triggers as the other overlays: chapters loading, duration known, resize.
+    private void RenderChapterMarkers()
+    {
+        ChapterMarkers.Children.Clear();
+        if (!TryGetTrackMapping(out var duration, out var inset, out var span)) return;
+
+        foreach (var chapter in chapters)
+        {
+            var start = chapter.Start.TotalSeconds;
+            if (start <= 0 || start >= duration) continue;
+            var tick = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = 2, Height = 4, Fill = ChapterTickBrush };
+            Canvas.SetLeft(tick, inset + start / duration * span - 1);
+            ChapterMarkers.Children.Add(tick);
+        }
+    }
+
     /// Rebuilds the yellow segment rectangles over SeekBar from scratch — called on segments
     /// loading, duration becoming known (from UpdateTransport) and SeekBar resizing. Cheap
     /// enough (a handful of segments) to just clear and redraw rather than diff.
@@ -1141,6 +1183,7 @@ public sealed partial class PlayerPage : Page
     {
         SponsorMarkers.Children.Clear();
         BufferedMarkers.Children.Clear();
+        ChapterMarkers.Children.Clear();
         markersDuration = -1;
         skipCandidate = null;
         SkipBlockButton.Visibility = Visibility.Collapsed;
@@ -1150,6 +1193,7 @@ public sealed partial class PlayerPage : Page
     {
         RenderSponsorMarkers();
         RenderBufferedRanges();
+        RenderChapterMarkers();
     }
 
     /// Shows the skip-ahead button from 10s before a segment's start through its end. Also stays
@@ -2076,6 +2120,29 @@ public sealed partial class PlayerPage : Page
         if (Player is not { } p) return;
         args.Handled = true;
         SeekPlayer(p, Math.Clamp(p.Position + deltaSeconds, 0, p.Duration));
+        WakeTransport();
+    }
+
+    private void OnChapterBackAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+        Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args) => JumpChapter(back: true, args);
+
+    private void OnChapterForwardAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+        Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args) => JumpChapter(back: false, args);
+
+    /// Ctrl+Left/Right: jump to the previous/next chapter start and show the landed-on chapter's
+    /// title in the toast. Back-steps walk chapter by chapter (ChapterService.PreviousStart's
+    /// tolerance); no chapters, or nothing in that direction, means the key does nothing.
+    private void JumpChapter(bool back, Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (Player is not { } p || chapters.Count == 0) return;
+        args.Handled = true;
+        var position = TimeSpan.FromSeconds(p.Position);
+        var target = back
+            ? ChapterService.PreviousStart(chapters, position)
+            : ChapterService.NextStart(chapters, position);
+        if (target is not { } t) return;
+        SeekPlayer(p, Math.Clamp(t.TotalSeconds, 0, p.Duration));
+        if (ChapterService.At(chapters, t) is { } landed) ShowSkipToast(landed.Title);
         WakeTransport();
     }
 

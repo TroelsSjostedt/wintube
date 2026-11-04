@@ -9,6 +9,8 @@
         <KeyboardAccelerator Key="Space" Invoked="OnSpaceAccelerator"/>
         <KeyboardAccelerator Key="Left" Invoked="OnLeftAccelerator"/>
         <KeyboardAccelerator Key="Right" Invoked="OnRightAccelerator"/>
+        <KeyboardAccelerator Key="Left" Modifiers="Control" Invoked="OnChapterBackAccelerator"/>
+        <KeyboardAccelerator Key="Right" Modifiers="Control" Invoked="OnChapterForwardAccelerator"/>
     </Page.KeyboardAccelerators>
     <Grid RowDefinitions="Auto,*" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid x:Name="TitleRow" Grid.Row="0" Padding="12,8" ColumnDefinitions="*,Auto">
@@ -84,6 +86,11 @@
                         IsHitTestVisible="False"/>
                 <Canvas x:Name="SponsorMarkers" Grid.Row="0" Height="4" VerticalAlignment="Center"
                         IsHitTestVisible="False"/>
+                <!-- Chapter boundary ticks, drawn over both range overlays so they stay visible
+                     on top of buffered/sponsor bars. Rebuilt in RenderChapterMarkers (chapters
+                     load, duration known, resize). -->
+                <Canvas x:Name="ChapterMarkers" Grid.Row="0" Height="4" VerticalAlignment="Center"
+                        IsHitTestVisible="False"/>
                 <!-- Hover time bubble. A Canvas in the SeekBar's own cell so it adds no layout height
                      (a Canvas measures to 0) and shares SeekBar's x origin; ShowSeekHover places the
                      bubble at a negative Top, i.e. above the bar, over the video. Declared last so it
@@ -92,7 +99,12 @@
                     <Border x:Name="SeekHoverBubble" Visibility="Collapsed"
                             Background="{ThemeResource SystemControlBackgroundAltHighBrush}"
                             CornerRadius="4" Padding="8,2" IsHitTestVisible="False">
-                        <TextBlock x:Name="SeekHoverText" FontSize="12"/>
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock x:Name="SeekHoverChapter" FontSize="12" FontWeight="SemiBold"
+                                       Visibility="Collapsed" MaxWidth="260"
+                                       TextTrimming="CharacterEllipsis" HorizontalAlignment="Center"/>
+                            <TextBlock x:Name="SeekHoverText" FontSize="12" HorizontalAlignment="Center"/>
+                        </StackPanel>
                     </Border>
                 </Canvas>
                 <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">

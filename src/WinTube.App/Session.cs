@@ -32,6 +32,7 @@ public sealed class Session
     public VideoMetadataService Metadata { get; }
     public SponsorBlockService SponsorBlock { get; }
     public CommentService Comments { get; }
+    public ChapterService Chapters { get; }
     public WatchProgressStore Progress { get; } = new(DataDirectory);
     public PlayerSettingsStore PlayerSettings { get; } = new(DataDirectory);
     public WatchHistoryStore History { get; } = new(DataDirectory);
@@ -60,6 +61,7 @@ public sealed class Session
         Metadata = new VideoMetadataService(InnerTube, visitorData);
         SponsorBlock = new SponsorBlockService(http);
         Comments = new CommentService(InnerTube);
+        Chapters = new ChapterService(InnerTube);
 
         var appwrite = AppwriteConfig.FromSecrets(secrets);
         if (appwrite is not null)
