@@ -29,16 +29,17 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
         nameof(ProgressFraction), typeof(double), typeof(VideoCard),
         new PropertyMetadata(0.0, OnProgressFractionChanged));
 
-    /// True only for cards sitting in Home's Continue watching row — gates the context menu's
-    /// "Remove from Continue watching" item (user's call: shown nowhere else).
-    public static readonly DependencyProperty InContinueWatchingProperty = DependencyProperty.Register(
-        nameof(InContinueWatching), typeof(bool), typeof(VideoCard),
+    /// True for cards in the My list row/page: the corner toggle is a remove cross there.
+    /// Elsewhere it is an add plus, shown only while the video is NOT already on the list —
+    /// a cross on an ordinary row invites "add" clicks that would remove instead (user's call).
+    public static readonly DependencyProperty InMyListContextProperty = DependencyProperty.Register(
+        nameof(InMyListContext), typeof(bool), typeof(VideoCard),
         new PropertyMetadata(false));
 
-    public bool InContinueWatching
+    public bool InMyListContext
     {
-        get => (bool)GetValue(InContinueWatchingProperty);
-        set => SetValue(InContinueWatchingProperty, value);
+        get => (bool)GetValue(InMyListContextProperty);
+        set => SetValue(InMyListContextProperty, value);
     }
 
     public VideoItem? Video
@@ -74,6 +75,9 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
         // PointerExited/Unloaded first) — cold the OLD identity before the new one takes over,
         // or the coordinator's hosts/gate stay stuck on an id this card can no longer report.
         App.Previews.Detach(this);
+        // Recycling rebinds Video on a live card — the toggle must not stand with the old
+        // identity's glyph; it re-shows (freshly decided) on the next PointerEntered.
+        ListToggle.Visibility = Visibility.Collapsed;
         if (Video is not { } video) return;
 
         Thumbnail.Source = new BitmapImage(
@@ -142,29 +146,39 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
         if (Video is { } video) await ActivateChannelAsync(video);
     }
 
-    // MARK: My list / Continue watching menu
+    // MARK: My list corner toggle
 
-    /// Membership can change between opens (another card toggled it), so the label is
-    /// decided per open, not at render time.
-    private void OnMenuOpening(object sender, object e)
+    /// Membership can change while the card stands (another card toggled it, playback touched
+    /// it), so this is decided each time the pointer enters, not at render time. In the My list
+    /// row/page: always a cross. Elsewhere: a plus, hidden entirely when the video is already
+    /// on the list.
+    private void UpdateListToggle()
     {
-        if (Video is not { } video) return;
-        MyListItem.Text = App.Session.MyList.Contains(video.Id)
-            ? "Remove from My list" : "Add to My list";
-        RemoveCwItem.Visibility = InContinueWatching ? Visibility.Visible : Visibility.Collapsed;
+        if (Video is not { } video)
+        {
+            ListToggle.Visibility = Visibility.Collapsed;
+            return;
+        }
+        var remove = InMyListContext;
+        if (!remove && App.Session.MyList.Contains(video.Id))
+        {
+            ListToggle.Visibility = Visibility.Collapsed;
+            return;
+        }
+        ListToggleIcon.Glyph = remove ? "" : "";
+        ToolTipService.SetToolTip(ListToggle, remove ? "Remove from My list" : "Add to My list");
+        ListToggle.Visibility = Visibility.Visible;
     }
 
-    /// Mutates the store only — the Home row and My list page react to MyList.Changed.
-    private void OnMyListToggle(object sender, RoutedEventArgs e)
+    /// Mutates the store only — the Home row and My list page react to MyList.Changed. Handled,
+    /// so the tap never opens the video underneath.
+    private void OnListToggleTapped(object sender, TappedRoutedEventArgs e)
     {
-        if (Video is not { } video) return;
-        if (App.Session.MyList.Contains(video.Id)) App.Session.MyList.Remove(video.Id);
-        else App.Session.MyList.Add(video);
-    }
-
-    private void OnRemoveFromContinueWatching(object sender, RoutedEventArgs e)
-    {
-        if (Video is { } video) App.Session.CwDismissals.Dismiss(video.Id);
+        e.Handled = true;
+        if (MouseBackGuard.SuppressTap() || Video is not { } video) return;
+        if (InMyListContext) App.Session.MyList.Remove(video.Id);
+        else App.Session.MyList.Touch(video);
+        UpdateListToggle();
     }
 
     /// True while a lazy channel-id resolve is in flight, so a second activation (double-click,
@@ -269,9 +283,17 @@ public sealed partial class VideoCard : UserControl, IPreviewHost
         App.Previews.Detach(this);
     }
 
-    private void OnPointerEntered(object sender, PointerRoutedEventArgs e) => App.Previews.Warm(this);
+    private void OnPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        UpdateListToggle();
+        App.Previews.Warm(this);
+    }
 
-    private void OnPointerExited(object sender, PointerRoutedEventArgs e) => App.Previews.Cold(this);
+    private void OnPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        ListToggle.Visibility = Visibility.Collapsed;
+        App.Previews.Cold(this);
+    }
 
     private void OnSelectorItemGotFocus(object sender, RoutedEventArgs e) => App.Previews.Warm(this);
 

@@ -31,9 +31,9 @@ public sealed class ShelfViewModel
         Title = section.Title;
         IsShorts = section.IsShorts;
         Continuation = section.Continuation;
-        var inContinueWatching = section.Title == WinTube.Core.Stores.ContinueWatchingBuilder.Title;
+        var inMyList = section.Title == HomePage.MyListTitle;
         foreach (var item in section.Items)
-            Items.Add(new VideoCardViewModel(item) { InContinueWatching = inContinueWatching });
+            Items.Add(new VideoCardViewModel(item) { InMyList = inMyList });
     }
 
     /// Shapes a continuation page's items to what this row shows - see FeedSection.Admitting.
@@ -46,8 +46,9 @@ public sealed class VideoCardViewModel(VideoItem video) : INotifyPropertyChanged
 {
     public VideoItem Video { get; } = video;
 
-    /// Set only by Home's Continue watching shelf; gates the card's remove-from-row menu item.
-    public bool InContinueWatching { get; init; }
+    /// True for cards sitting in the My list row/page — there the corner toggle is a cross;
+    /// elsewhere it is a plus shown only while the video is NOT on the list.
+    public bool InMyList { get; init; }
 
     private double progressFraction;
     public double ProgressFraction
@@ -62,4 +63,27 @@ public sealed class VideoCardViewModel(VideoItem video) : INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+}
+
+/// In-place diff of a card collection to a target item order. Replacing the collection (or the
+/// shelf) makes WinUI rebuild the list and reset its scroll position; removing/inserting/moving
+/// items instead keeps the viewport where it was and lets neighbours slide into the gap.
+public static class CardListSync
+{
+    public static void Apply(
+        ObservableCollection<VideoCardViewModel> cards, IReadOnlyList<VideoItem> target,
+        Func<VideoItem, VideoCardViewModel> make)
+    {
+        var wanted = target.Select(v => v.Id).ToHashSet();
+        for (var i = cards.Count - 1; i >= 0; i--)
+            if (!wanted.Contains(cards[i].Video.Id)) cards.RemoveAt(i);
+        for (var i = 0; i < target.Count; i++)
+        {
+            var at = -1;
+            for (var j = 0; j < cards.Count; j++)
+                if (cards[j].Video.Id == target[i].Id) { at = j; break; }
+            if (at < 0) cards.Insert(i, make(target[i]));
+            else if (at != i) cards.Move(at, i);
+        }
+    }
 }

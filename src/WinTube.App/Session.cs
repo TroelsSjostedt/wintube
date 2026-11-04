@@ -37,7 +37,6 @@ public sealed class Session
     public PlayerSettingsStore PlayerSettings { get; } = new(DataDirectory);
     public WatchHistoryStore History { get; } = new(DataDirectory);
     public MyListStore MyList { get; } = new(DataDirectory);
-    public ContinueWatchingDismissals CwDismissals { get; } = new(DataDirectory);
     public WatchProgressSync? ProgressSync { get; }
 
     public StoredProfile? Profile { get; private set; }
@@ -145,7 +144,42 @@ public sealed class Session
         Progress.Activate(Profile?.ProfileId);
         History.Activate(Profile?.ProfileId);
         MyList.Activate(Profile?.ProfileId);
-        CwDismissals.Activate(Profile?.ProfileId);
+        MigrateContinueWatching();
+    }
+
+    /// One-time per profile: folds the retired Continue watching row's content into My list,
+    /// so merging the two lists doesn't empty the user's current row. Mirrors the old
+    /// ContinueWatchingBuilder rules (resumable, not dismissed, not a Short); a marker file
+    /// keeps it from re-running, and the dismissals file is retired with it. Best-effort —
+    /// a failure just means the old row's content isn't carried over.
+    private void MigrateContinueWatching()
+    {
+        if (Profile?.ProfileId is not { } profile) return;
+        var dir = Path.Combine(DataDirectory, "profiles", profile);
+        var marker = Path.Combine(dir, "cw-migrated");
+        try
+        {
+            if (File.Exists(marker)) return;
+            var dismissedPath = Path.Combine(dir, "cw-dismissed.json");
+            Dictionary<string, DateTimeOffset> dismissed = File.Exists(dismissedPath)
+                ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, DateTimeOffset>>(
+                      File.ReadAllText(dismissedPath)) ?? []
+                : [];
+            var progress = Progress.Entries;
+            foreach (var (id, watchedAt) in History.WatchedHere)
+            {
+                if (dismissed.TryGetValue(id, out var dismissedAt) && dismissedAt >= watchedAt) continue;
+                if (!progress.TryGetValue(id, out var entry) || entry.DurationSeconds <= 0) continue;
+                var fraction = entry.PositionSeconds / entry.DurationSeconds;
+                if (fraction <= 0 || fraction >= 0.95) continue;
+                if (History.Card(id) is not { IsShort: false } video) continue;
+                MyList.Seed(video, watchedAt);
+            }
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(marker, "");
+            File.Delete(dismissedPath);
+        }
+        catch (Exception e) when (e is IOException or System.Text.Json.JsonException) { }
     }
 
     private void ActivateSync() =>

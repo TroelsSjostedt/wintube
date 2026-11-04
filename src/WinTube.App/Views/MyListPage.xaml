@@ -19,6 +19,7 @@
                     <DataTemplate x:DataType="local:VideoCardViewModel">
                         <controls:VideoCard Video="{x:Bind Video}"
                             ProgressFraction="{x:Bind ProgressFraction, Mode=OneWay}"
+                            InMyListContext="{x:Bind InMyList}"
                             Clicked="OnVideoCardClicked"
                             ChannelClicked="OnChannelClicked"/>
                     </DataTemplate>
@@ -26,7 +27,7 @@
             </GridView>
         </ScrollViewer>
 
-        <TextBlock x:Name="EmptyText" Text="Nothing saved yet — right-click a video and pick “Add to My list”."
+        <TextBlock x:Name="EmptyText" Text="Nothing saved yet — hover a video and click its + button, or just start watching one."
                    HorizontalAlignment="Center" VerticalAlignment="Center"
                    Style="{StaticResource SubtitleTextBlockStyle}"
                    Visibility="Collapsed"/>

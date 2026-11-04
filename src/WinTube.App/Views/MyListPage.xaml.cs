@@ -37,11 +37,13 @@ public sealed partial class MyListPage : Page
 
     private void OnMyListChanged() => Rebuild();
 
+    /// In-place diff (CardListSync) rather than clear-and-refill, so removing a card keeps the
+    /// grid's scroll position and the remaining cards slide into the gap.
     private void Rebuild()
     {
-        results.Clear();
-        foreach (var video in App.Session.MyList.Items)
-            results.Add(new VideoCardViewModel(video));
+        var visible = WinTube.Core.Stores.MyListStore.Visible(
+            App.Session.MyList.Items, App.Session.Progress.Entries);
+        CardListSync.Apply(results, visible, v => new VideoCardViewModel(v) { InMyList = true });
         RefreshProgress();
         EmptyText.Visibility = results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }

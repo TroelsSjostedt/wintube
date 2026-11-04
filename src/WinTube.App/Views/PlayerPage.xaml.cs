@@ -592,6 +592,9 @@ public sealed partial class PlayerPage : Page
                 startAt = null;
                 hasPlayed = true;
                 App.Session.History.Record(video!);
+                // Starting a video is choosing it for My list (the merged watch-later/continue-
+                // watching list) — same gesture as the card's plus button.
+                App.Session.MyList.Touch(video!);
                 StartProgressTimer();
                 _ = LoadSponsorSegmentsAsync();
                 _ = LoadChaptersAsync();

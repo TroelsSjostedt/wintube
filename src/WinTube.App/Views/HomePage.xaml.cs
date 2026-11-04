@@ -32,7 +32,6 @@ public sealed partial class HomePage : Page
     {
         App.Session.Progress.Changed += OnProgressChanged;
         App.Session.MyList.Changed += OnMyListChanged;
-        App.Session.CwDismissals.Changed += OnCwDismissed;
         await LoadHomeAsync();
     }
 
@@ -40,7 +39,6 @@ public sealed partial class HomePage : Page
     {
         App.Session.Progress.Changed -= OnProgressChanged;
         App.Session.MyList.Changed -= OnMyListChanged;
-        App.Session.CwDismissals.Changed -= OnCwDismissed;
     }
 
     // MARK: loading
@@ -50,10 +48,8 @@ public sealed partial class HomePage : Page
         ErrorBar.IsOpen = false;
         try
         {
-            var localRow = ContinueWatchingRow();
-            var myListRow = MyListRow();
             var page = await App.Session.RunAsync(
-                t => App.Session.Feed.LoadCompositeHomeAsync(t, localRow, myListRow));
+                t => App.Session.Feed.LoadCompositeHomeAsync(t, MyListRow()));
             shelves.Clear();
             foreach (var section in page.Sections) shelves.Add(new ShelfViewModel(section));
             historyRowCount = page.HistoryRowCount;
@@ -68,30 +64,15 @@ public sealed partial class HomePage : Page
         }
     }
 
-    /// The locally-built "Continue watching" row, read on the UI thread before the network
-    /// fetch. Cards get their progress line from RefreshAllProgress like every other row.
-    /// Best-effort: a store hiccup leaves the row out rather than failing Home.
-    private static FeedSection? ContinueWatchingRow()
-    {
-        try
-        {
-            return ContinueWatchingBuilder.Row(
-                App.Session.History.WatchedHere, App.Session.Progress.Entries,
-                App.Session.History.Card, App.Session.CwDismissals.Entries);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     public const string MyListTitle = "My list";
 
-    /// The local "My list" row, or null when the list is empty (the row is omitted, like
-    /// Continue watching). Shorts are kept out of the landscape row but stay on the list.
+    /// The local "My list" row — the merged watch-later/continue-watching list, latest-touched
+    /// first, finished videos hidden — or null when empty (the row is omitted). Shorts are kept
+    /// out of the landscape row but stay on the list page.
     private static FeedSection? MyListRow()
     {
-        var items = App.Session.MyList.Items.Where(v => !v.IsShort).ToList();
+        var items = MyListStore.Visible(App.Session.MyList.Items, App.Session.Progress.Entries)
+            .Where(v => !v.IsShort).ToList();
         return items.Count == 0
             ? null
             : new FeedSection(Guid.NewGuid().ToString("N"), MyListTitle, items, null, IsShorts: false);
@@ -101,11 +82,10 @@ public sealed partial class HomePage : Page
 
     private void OnMyListChanged() => RefreshLocalRow(MyListTitle, MyListRow());
 
-    private void OnCwDismissed() => RefreshLocalRow(ContinueWatchingBuilder.Title, ContinueWatchingRow());
-
-    /// Replaces (or removes) a local row's shelf in place after its store changed. A row not
-    /// currently shown is NOT inserted — its position depends on the composite stitch, so it
-    /// appears on the next full Home load instead.
+    /// Updates a local row's cards in place after its store changed — an in-place diff, not a
+    /// shelf replacement, so the row keeps its scroll position and neighbours slide into a
+    /// removed card's gap. A row not currently shown is NOT inserted — its position depends on
+    /// the composite stitch, so it appears on the next full Home load instead.
     private void RefreshLocalRow(string title, FeedSection? section)
     {
         var index = -1;
@@ -117,8 +97,9 @@ public sealed partial class HomePage : Page
             shelves.RemoveAt(index);
             return;
         }
-        var shelf = new ShelfViewModel(section);
-        shelves[index] = shelf;
+        var shelf = shelves[index];
+        CardListSync.Apply(shelf.Items, section.Items,
+            v => new VideoCardViewModel(v) { InMyList = true });
         RefreshProgress(shelf.Items);
     }
 

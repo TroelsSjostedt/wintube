@@ -371,40 +371,4 @@ public class FeedServiceTests
         Assert.Equal(1, page.HistoryRowCount);   // the local row is not a history row
     }
 
-    [Fact]
-    public async Task CompositeHome_MyListRowSitsBetweenSubscriptionsAndTheRestOfHome()
-    {
-        var feed = MakeRouted(new()
-        {
-            ["default"] = SectionList(
-                Shelf("Recommended", Tile("h1")), Shelf("New to you", Tile("h2"))),
-            ["FEsubscriptions"] = SectionList(Shelf("Today", Tile("s9"))),
-            ["FEhistory"] = SectionList(Shelf("x", Tile("w1"))),
-        });
-        var cw = new FeedSection("cw", "Continue watching", [new VideoItem { Id = "c1", Title = "c" }], null, false);
-        var myList = new FeedSection("ml", "My list", [new VideoItem { Id = "m1", Title = "m" }], null, false);
-        var page = await feed.LoadCompositeHomeAsync("T", cw, myList);
-        Assert.Equal(
-            ["Recommended", "Continue watching", "From your subscriptions", "My list", "New to you", "History"],
-            page.Sections.Select(s => s.Title));
-    }
-
-    /// The subscriptions feed often carries its own Shorts row; My list must sit ABOVE it
-    /// (user's placement: between the subscriptions videos and the Shorts row).
-    [Fact]
-    public async Task CompositeHome_MyListRowSitsAboveASubscriptionsShortsRow()
-    {
-        var feed = MakeRouted(new()
-        {
-            ["default"] = SectionList(Shelf("Recommended", Tile("h1"))),
-            ["FEsubscriptions"] = SectionList(
-                Shelf("Today", Tile("s9")),
-                "{\"reelShelfRenderer\":{\"items\":[" + ShortTile("sh1") + "]}}"),
-        });
-        var myList = new FeedSection("ml", "My list", [new VideoItem { Id = "m1", Title = "m" }], null, false);
-        var page = await feed.LoadCompositeHomeAsync("T", null, myList);
-        Assert.Equal(
-            ["Recommended", "From your subscriptions", "My list", "Shorts"],
-            page.Sections.Select(s => s.Title));
-    }
 }

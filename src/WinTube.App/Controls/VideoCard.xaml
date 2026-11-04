@@ -11,11 +11,8 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid.ContextFlyout>
-            <MenuFlyout Opening="OnMenuOpening">
+            <MenuFlyout>
                 <MenuFlyoutItem x:Name="GoToChannelItem" Text="Go to channel" Click="OnGoToChannel"/>
-                <MenuFlyoutItem x:Name="MyListItem" Text="Add to My list" Click="OnMyListToggle"/>
-                <MenuFlyoutItem x:Name="RemoveCwItem" Text="Remove from Continue watching"
-                                Click="OnRemoveFromContinueWatching" Visibility="Collapsed"/>
             </MenuFlyout>
         </Grid.ContextFlyout>
 
@@ -33,6 +30,15 @@
             </Border>
             <Border x:Name="ProgressLine" Background="#E5342B" Height="3" Width="0"
                     HorizontalAlignment="Left" VerticalAlignment="Bottom"/>
+            <!-- My list toggle: plus (not on the list) or cross (on it), shown while the pointer
+                 is over the card. Its Tapped handler marks the event handled so a click here
+                 never opens the video. -->
+            <Border x:Name="ListToggle" Background="#CC000000" CornerRadius="4"
+                    Width="28" Height="28" Margin="0,6,6,0"
+                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Visibility="Collapsed" Tapped="OnListToggleTapped">
+                <FontIcon x:Name="ListToggleIcon" Glyph="&#xE710;" FontSize="13" Foreground="White"/>
+            </Border>
         </Grid>
 
         <TextBlock x:Name="TitleText" Grid.Row="1" Margin="0,6,0,0"

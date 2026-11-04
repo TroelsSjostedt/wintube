@@ -89,7 +89,7 @@ public sealed class FeedService(InnerTubeClient innerTube)
     /// `localRow`, when given, is a row the caller built from on-device state; it lands right
     /// after Home's lead (directly below "Recommended"), ahead of the subscriptions rows.
     public async Task<CompositeHomePage> LoadCompositeHomeAsync(
-        string accessToken, FeedSection? localRow = null, FeedSection? myListRow = null,
+        string accessToken, FeedSection? localRow = null,
         CancellationToken ct = default)
     {
         var homeTask = LoadHomeAsync(accessToken, ct);
@@ -107,18 +107,8 @@ public sealed class FeedService(InnerTubeClient innerTube)
         var composed = new List<(FeedSection Section, bool IsHistory)>();
         composed.AddRange(home.Sections.Take(leadCount).Select(s => (s, false)));
         if (localRow is not null) composed.Add((localRow, false));
-        // My list sits between the subscriptions videos and the Shorts row (user's placement):
-        // the subscriptions feed often carries its own Shorts row, and My list goes ABOVE it —
-        // otherwise right after the subscriptions block.
         var subSections = subscriptions?.Sections ?? [];
-        var subShorts = subSections.ToList().FindIndex(s => s.IsShorts);
-        var myListAt = subShorts >= 0 ? subShorts : subSections.Count;
-        for (var i = 0; i < subSections.Count; i++)
-        {
-            if (i == myListAt && myListRow is not null) composed.Add((myListRow, false));
-            composed.Add((subSections[i], false));
-        }
-        if (myListAt == subSections.Count && myListRow is not null) composed.Add((myListRow, false));
+        composed.AddRange(subSections.Select(s => (s, false)));
         composed.AddRange(home.Sections.Skip(leadCount).Select(s => (s, false)));
         if (history is not null)
             composed.AddRange(history.Sections.Select(s => (s, true)));
