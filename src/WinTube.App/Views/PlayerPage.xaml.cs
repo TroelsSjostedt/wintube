@@ -168,6 +168,12 @@ public sealed partial class PlayerPage : Page
     private IReadOnlyList<TranscriptCue> transcriptCues = [];
     private bool transcriptLoaded;
     private TranscriptRowViewModel? activeTranscriptRow;
+    private ScrollViewer? transcriptScrollViewer;
+    /// True while a ChangeView/ScrollIntoView of OURS is in flight, so its ViewChanged echo
+    /// isn't mistaken for the user scrolling.
+    private bool transcriptAutoScrolling;
+    /// A manual scroll suspends auto-follow until this instant (10 s after the last one).
+    private DateTimeOffset transcriptUserScrollUntil = DateTimeOffset.MinValue;
 
     // MARK: comments
     private readonly ObservableCollection<CommentRowViewModel> commentRows = [];
@@ -2048,7 +2054,55 @@ public sealed partial class PlayerPage : Page
         activeTranscriptRow = current;
         if (current is null) return;
         current.IsActive = true;
-        if (TranscriptSearch.Text.Length == 0) TranscriptList.ScrollIntoView(current);
+        // Auto-follow centres the active line — but never while the list is filtered, and
+        // never within 10 s of the user scrolling it themselves (they're reading; the next
+        // line change after the pause picks the follow back up).
+        if (TranscriptSearch.Text.Length == 0 && DateTimeOffset.UtcNow >= transcriptUserScrollUntil)
+            CenterTranscriptRow(current);
+    }
+
+    /// Scrolls the active row to the vertical middle of the panel. A row virtualized out of
+    /// reach has no container to measure — jump it into view first, then centre on the next
+    /// dispatcher pass once it has a layout position.
+    private void CenterTranscriptRow(TranscriptRowViewModel row)
+    {
+        if (EnsureTranscriptScrollViewer() is not { } scrollViewer) return;
+        if (TranscriptList.ContainerFromItem(row) is not FrameworkElement container)
+        {
+            transcriptAutoScrolling = true;
+            TranscriptList.ScrollIntoView(row);
+            dispatcher.TryEnqueue(() =>
+            {
+                if (row == activeTranscriptRow && TranscriptList.ContainerFromItem(row) is not null)
+                    CenterTranscriptRow(row);
+            });
+            return;
+        }
+        var top = container.TransformToVisual(scrollViewer)
+            .TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+        var target = scrollViewer.VerticalOffset + top
+            - (scrollViewer.ViewportHeight - container.ActualHeight) / 2;
+        transcriptAutoScrolling = true;
+        scrollViewer.ChangeView(null, Math.Max(0, target), null, false);
+    }
+
+    /// Finds the list's ScrollViewer part once and watches it: a ViewChanged that isn't the
+    /// echo of our own scroll is the user scrolling, which suspends auto-follow.
+    private ScrollViewer? EnsureTranscriptScrollViewer()
+    {
+        if (transcriptScrollViewer is { } existing) return existing;
+        transcriptScrollViewer = FindDescendant<ScrollViewer>(TranscriptList);
+        if (transcriptScrollViewer is { } found)
+            found.ViewChanged += (_, e) =>
+            {
+                if (transcriptAutoScrolling)
+                {
+                    if (!e.IsIntermediate) transcriptAutoScrolling = false;
+                    return;
+                }
+                transcriptUserScrollUntil = DateTimeOffset.UtcNow.AddSeconds(10);
+            };
+        return transcriptScrollViewer;
     }
 
     /// Mirrors OnCommentsPanelTapped: taps inside the panel must not toggle playback.
