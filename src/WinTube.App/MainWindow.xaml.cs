@@ -27,6 +27,10 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         // The exe icon covers Explorer; the window object needs its own for taskbar/title bar.
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "wintube.ico"));
+        // The caption bar follows the WINDOWS theme by default while the content follows the
+        // APP theme — a light Windows mode gives a white bar over a dark app. Tie it to the
+        // app theme instead.
+        AppWindow.TitleBar.PreferredTheme = Microsoft.UI.Windowing.TitleBarTheme.UseDefaultAppMode;
         // The pane's own back arrow is THE back button everywhere; it lights up whenever the
         // frame has somewhere to go back to (player, channel chains, subscriptions drill-ins).
         RootFrame.Navigated += OnRootFrameNavigated;
