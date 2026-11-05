@@ -74,6 +74,7 @@
 
             <Grid x:Name="TransportBar" Visibility="Collapsed" VerticalAlignment="Bottom" Padding="16,8,16,12"
                   Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                  SizeChanged="OnTransportBarSizeChanged"
                   PointerEntered="OnTransportEntered" PointerExited="OnTransportExited" Tapped="OnTransportBarTapped">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>

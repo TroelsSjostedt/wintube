@@ -1026,7 +1026,23 @@ public sealed partial class PlayerPage : Page
         ProtectedCursor = visible ? InputSystemCursor.Create(InputSystemCursorShape.Arrow) : null;
         // Subtitles sit at mpv's bottom default, which the bar covers — lift them with it.
         if (Player is { } player) player.SubtitleLifted = visible;
+        UpdatePanelLift();
     }
+
+    /// The right-side panels (comments/transcript/description) must not cover the transport
+    /// bar: their bottom follows the bar's top while it shows — like the subtitle lift. The
+    /// bar's SizeChanged keeps the margin honest on the first show (ActualHeight is 0 until
+    /// the bar has measured) and on window resizes.
+    private void UpdatePanelLift()
+    {
+        var lift = TransportBar.Visibility == Visibility.Visible ? TransportBar.ActualHeight : 0;
+        var margin = new Thickness(0, 0, 0, lift);
+        CommentsPanel.Margin = margin;
+        TranscriptPanel.Margin = margin;
+        DescriptionPanel.Margin = margin;
+    }
+
+    private void OnTransportBarSizeChanged(object sender, SizeChangedEventArgs e) => UpdatePanelLift();
 
     // MARK: progress
 
