@@ -33,6 +33,7 @@ public sealed class Session
     public SponsorBlockService SponsorBlock { get; }
     public CommentService Comments { get; }
     public ChapterService Chapters { get; }
+    public TranscriptService Transcripts { get; }
     public WatchProgressStore Progress { get; } = new(DataDirectory);
     public PlayerSettingsStore PlayerSettings { get; } = new(DataDirectory);
     public WatchHistoryStore History { get; } = new(DataDirectory);
@@ -61,6 +62,7 @@ public sealed class Session
         SponsorBlock = new SponsorBlockService(http);
         Comments = new CommentService(InnerTube);
         Chapters = new ChapterService(InnerTube);
+        Transcripts = new TranscriptService(http);
 
         var appwrite = AppwriteConfig.FromSecrets(secrets);
         if (appwrite is not null)

@@ -17,6 +17,12 @@ public sealed class StubHttpHandler(Func<HttpRequestMessage, string, HttpRespons
         return respond(request, body);
     }
 
+    public static HttpResponseMessage TextResponse(string text, int status = 200) => new()
+    {
+        StatusCode = (System.Net.HttpStatusCode)status,
+        Content = new StringContent(text, System.Text.Encoding.UTF8, "text/vtt"),
+    };
+
     public static HttpResponseMessage JsonResponse(string json, int status = 200) => new()
     {
         StatusCode = (System.Net.HttpStatusCode)status,

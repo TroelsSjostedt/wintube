@@ -41,6 +41,13 @@ public static class SubtitleSelection
         return null;
     }
 
+    /// The track the transcript panel reads: the saved subtitle-language preference first,
+    /// else the video's own audio language — never an arbitrary "first track in the list".
+    /// Null means neither matched, and the panel asks the user to pick a subtitle language.
+    public static SubtitleChoice? ChooseForTranscript(
+        IReadOnlyList<CaptionTrack> tracks, string? preferredLanguage, string? audioLanguage) =>
+        Choose(tracks, preferredLanguage) ?? Choose(tracks, audioLanguage);
+
     /// 1 exact, 2 regional variant of the preference, 3 same primary subtag, 0 no match.
     private static int MatchTier(string trackLanguage, string preferredLanguage)
     {

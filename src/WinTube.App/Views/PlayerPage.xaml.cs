@@ -163,6 +163,12 @@ public sealed partial class PlayerPage : Page
     private string? description;
     private bool HasDescription => !string.IsNullOrWhiteSpace(description);
 
+    // MARK: transcript
+    private readonly ObservableCollection<TranscriptRowViewModel> transcriptRows = [];
+    private IReadOnlyList<TranscriptCue> transcriptCues = [];
+    private bool transcriptLoaded;
+    private TranscriptRowViewModel? activeTranscriptRow;
+
     // MARK: comments
     private readonly ObservableCollection<CommentRowViewModel> commentRows = [];
     private List<CommentItem> topLevelComments = [];
@@ -398,6 +404,8 @@ public sealed partial class PlayerPage : Page
         // language here would narrow a "en" preference to "en-GB" the first time that track won.
         // A ladder retry re-enters here and re-applies against its own captions.
         captionTracks = stream.Captions;
+        // Same gate as the CC picker: no caption tracks, no transcript to offer.
+        TranscriptButton.Visibility = captionTracks.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         var preferred = SubtitleSelection.Choose(captionTracks, App.Session.PlayerSettings.LoadSubtitleLanguage());
         ApplySubtitleChoice(preferred, preferred is null ? SubtitleMode.Off : SubtitleMode.Manual);
 
@@ -608,7 +616,7 @@ public sealed partial class PlayerPage : Page
             }
         };
         host.AudioTracksChanged += () => { if (!leftPage && host == Player) OnAudioTracksChanged(host); };
-        host.PositionChanged += _ => { if (host == Player) { OnPlayerPosition(); UpdateTransport(); UpdateSkipButtonVisibility(); } };
+        host.PositionChanged += _ => { if (host == Player) { OnPlayerPosition(); UpdateTransport(); UpdateSkipButtonVisibility(); UpdateTranscriptActive(); } };
         // time-pos stops ticking the instant playback pauses, so UpdateTransport (driven off
         // PositionChanged) can't be trusted to refresh the play/pause icon — mpv's own "pause"
         // property change is the live signal instead.
@@ -1565,6 +1573,16 @@ public sealed partial class PlayerPage : Page
         lastSubtitleUrl = choice?.Url;
         UpdateSubtitleChecks();
         if (persist) App.Session.PlayerSettings.SaveSubtitleLanguage(choice?.Language);
+        // The transcript follows the attached subtitle track — ANY track switch invalidates
+        // the loaded cues, including switching to Off (the transcript then falls back to the
+        // preference/audio-language chain instead of keeping the last track's language). An
+        // open panel refetches right away (also when it was sitting on the "Choose subtitle
+        // language" message); a closed one refetches on next open.
+        if (urlChanged)
+        {
+            transcriptLoaded = TranscriptPanel.Visibility == Visibility.Visible;
+            if (transcriptLoaded) _ = LoadTranscriptAsync();
+        }
         if (urlChanged && Player is not null && loadTarget is { } target)
             ReloadKeepingPosition(target, "Subtitle switch did not complete.");
     }
@@ -1640,6 +1658,13 @@ public sealed partial class PlayerPage : Page
         chosenAudioLanguage = track.Language;
         Player?.SelectAudioTrack(track.Id);
         UpdateAudioChecks();
+        // With no subtitle attached the transcript reads the audio language — a dub switch
+        // invalidates it, same pattern as a CC switch in ApplySubtitleChoice.
+        if (activeSubtitle is null)
+        {
+            transcriptLoaded = TranscriptPanel.Visibility == Visibility.Visible;
+            if (transcriptLoaded) _ = LoadTranscriptAsync();
+        }
     }
 
     /// Follows the host's SelectedAudioId (what mpv picked via alang until a pick is made); with no
@@ -1824,12 +1849,194 @@ public sealed partial class PlayerPage : Page
             CommentsPanel.Visibility = Visibility.Collapsed;
             SetCommentsChecked(false);
         }
+        if (TranscriptPanel.Visibility == Visibility.Visible)
+        {
+            TranscriptPanel.Visibility = Visibility.Collapsed;
+            TranscriptButton.IsChecked = false;
+        }
         DescriptionPanel.Visibility = Visibility.Visible;
     }
 
     /// Mirrors OnCommentsPanelTapped: a tap anywhere inside the panel must never bubble to
     /// OnPlayerTapped and toggle playback.
     private void OnDescriptionPanelTapped(object sender, TappedRoutedEventArgs e) => e.Handled = true;
+
+    // MARK: transcript
+    //
+    // Fully try/caught like comments: a transcript failure must never surface as, or be
+    // confused with, a playback failure.
+
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush TranscriptMatchBrush =
+        new(Windows.UI.Color.FromArgb(0xFF, 0x5A, 0x4A, 0x1A));
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush TranscriptMatchTextBrush =
+        new(Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xD9, 0x7A));
+
+    /// Shared by the bar button, Esc and Ctrl+F. Opening closes the other right-side panels
+    /// (same slot) and lazily fetches the VTT once per page.
+    private void OnToggleTranscript(object sender, RoutedEventArgs e)
+    {
+        if (TranscriptPanel.Visibility == Visibility.Visible)
+        {
+            TranscriptPanel.Visibility = Visibility.Collapsed;
+            TranscriptButton.IsChecked = false;
+            return;
+        }
+        OpenTranscript();
+    }
+
+    private void OpenTranscript()
+    {
+        DescriptionPanel.Visibility = Visibility.Collapsed;
+        if (CommentsPanel.Visibility == Visibility.Visible)
+        {
+            CommentsPanel.Visibility = Visibility.Collapsed;
+            SetCommentsChecked(false);
+        }
+        TranscriptPanel.Visibility = Visibility.Visible;
+        TranscriptButton.IsChecked = true;
+        if (transcriptLoaded) return;
+        transcriptLoaded = true;
+        _ = LoadTranscriptAsync();
+    }
+
+    /// Ctrl+F: open the panel (when the video has captions) and put the caret in the search box.
+    private void OnTranscriptFindAccelerator(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender,
+        Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (TranscriptButton.Visibility != Visibility.Visible) return;
+        args.Handled = true;
+        if (TranscriptPanel.Visibility != Visibility.Visible) OpenTranscript();
+        TranscriptSearch.Focus(FocusState.Programmatic);
+    }
+
+    /// The transcript reads the currently attached subtitle track when there is one; otherwise
+    /// the saved subtitle-language preference, else the video's audio language. When none of
+    /// those match a track, the panel asks for a pick instead of guessing a language.
+    private async Task LoadTranscriptAsync()
+    {
+        // Audio fallback: the dub the user switched to wins over the video's original track.
+        var choice = activeSubtitle ?? SubtitleSelection.ChooseForTranscript(
+            captionTracks, App.Session.PlayerSettings.LoadSubtitleLanguage(),
+            chosenAudioLanguage ?? lastAudioLanguage);
+        if (choice is null)
+        {
+            ShowTranscriptStatus("Choose subtitle language for transcript.");
+            transcriptLoaded = false;   // a CC pick re-arms the next open
+            return;
+        }
+        ShowTranscriptStatus("Loading…");
+        try
+        {
+            var cues = await App.Session.Transcripts.GetAsync(choice.Url);
+            if (leftPage) return;
+            transcriptCues = cues;
+            if (cues.Count == 0)
+            {
+                ShowTranscriptStatus("No transcript is available for this video.");
+                return;
+            }
+            TranscriptStatus.Visibility = Visibility.Collapsed;
+            RebuildTranscriptRows();
+        }
+        catch (Exception)
+        {
+            // Allow the next open to retry — the URL is short-lived and the network may be back.
+            transcriptLoaded = false;
+            if (!leftPage) ShowTranscriptStatus("Couldn't load the transcript.");
+        }
+    }
+
+    private void ShowTranscriptStatus(string message)
+    {
+        TranscriptStatus.Text = message;
+        TranscriptStatus.Visibility = Visibility.Visible;
+    }
+
+    /// The search box filters the list to matching lines (case-insensitive); clearing it
+    /// restores the full transcript. The clear button only stands while there is a query.
+    private void OnTranscriptSearchChanged(object sender, TextChangedEventArgs e)
+    {
+        TranscriptClearButton.Visibility =
+            TranscriptSearch.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (transcriptCues.Count > 0) RebuildTranscriptRows();
+    }
+
+    private void OnTranscriptSearchClear(object sender, RoutedEventArgs e)
+    {
+        TranscriptSearch.Text = "";
+        TranscriptSearch.Focus(FocusState.Programmatic);
+    }
+
+    private void RebuildTranscriptRows()
+    {
+        var query = TranscriptSearch.Text.Trim();
+        var cues = query.Length == 0
+            ? transcriptCues
+            : transcriptCues.Where(c =>
+                c.Text.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+        TranscriptHitCount.Text = query.Length == 0 ? "" :
+            cues.Count == 1 ? "1 hit" : $"{cues.Count} hits";
+
+        var formatDuration = Math.Max(markersDuration,
+            transcriptCues.Count > 0 ? transcriptCues[^1].Start.TotalSeconds : 0);
+        transcriptRows.Clear();
+        foreach (var cue in cues)
+            transcriptRows.Add(new TranscriptRowViewModel(
+                cue, Fmt(cue.Start.TotalSeconds, formatDuration), query));
+        activeTranscriptRow = null;
+        UpdateTranscriptActive();
+    }
+
+    /// Applies the match highlight to a row's text. DataContextChanged (not Loaded) so
+    /// recycled containers re-highlight for the row they now show.
+    private void OnTranscriptTextContext(FrameworkElement sender, DataContextChangedEventArgs args)
+    {
+        if (sender is not TextBlock block) return;
+        block.TextHighlighters.Clear();
+        if (args.NewValue is not TranscriptRowViewModel row || row.Query.Length == 0) return;
+
+        var highlighter = new Microsoft.UI.Xaml.Documents.TextHighlighter
+        {
+            Background = TranscriptMatchBrush,
+            Foreground = TranscriptMatchTextBrush,
+        };
+        for (var at = row.Text.IndexOf(row.Query, StringComparison.OrdinalIgnoreCase);
+             at >= 0;
+             at = row.Text.IndexOf(row.Query, at + row.Query.Length, StringComparison.OrdinalIgnoreCase))
+            highlighter.Ranges.Add(new Microsoft.UI.Xaml.Documents.TextRange(at, row.Query.Length));
+        if (highlighter.Ranges.Count > 0) block.TextHighlighters.Add(highlighter);
+    }
+
+    private void OnTranscriptCueClicked(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is not TranscriptRowViewModel row || Player is not { } p) return;
+        SeekPlayer(p, Math.Clamp(row.Cue.Start.TotalSeconds, 0, p.Duration));
+        WakeTransport();
+    }
+
+    /// Follows playback: marks the cue covering the position and keeps it in view — but only
+    /// while the full list shows (auto-scrolling a filtered result list would fight the user).
+    private void UpdateTranscriptActive()
+    {
+        if (TranscriptPanel.Visibility != Visibility.Visible || transcriptRows.Count == 0) return;
+        var position = Player is { } p ? TimeSpan.FromSeconds(p.Position) : TimeSpan.Zero;
+
+        TranscriptRowViewModel? current = null;
+        foreach (var row in transcriptRows)
+        {
+            if (row.Cue.Start > position) break;
+            current = row;
+        }
+        if (current == activeTranscriptRow) return;
+        if (activeTranscriptRow is { } old) old.IsActive = false;
+        activeTranscriptRow = current;
+        if (current is null) return;
+        current.IsActive = true;
+        if (TranscriptSearch.Text.Length == 0) TranscriptList.ScrollIntoView(current);
+    }
+
+    /// Mirrors OnCommentsPanelTapped: taps inside the panel must not toggle playback.
+    private void OnTranscriptPanelTapped(object sender, TappedRoutedEventArgs e) => e.Handled = true;
 
     // MARK: comments
     //
@@ -1871,8 +2078,13 @@ public sealed partial class PlayerPage : Page
             return;
         }
 
-        // Mutual exclusion with the description panel (I1-style): the two share the same slot.
+        // Mutual exclusion with the description and transcript panels: same slot.
         DescriptionPanel.Visibility = Visibility.Collapsed;
+        if (TranscriptPanel.Visibility == Visibility.Visible)
+        {
+            TranscriptPanel.Visibility = Visibility.Collapsed;
+            TranscriptButton.IsChecked = false;
+        }
         CommentsPanel.Visibility = Visibility.Visible;
         SetCommentsChecked(true);
         if (commentsLoaded) return;
@@ -2085,6 +2297,13 @@ public sealed partial class PlayerPage : Page
             return;
         }
 
+        if (TranscriptPanel.Visibility == Visibility.Visible)
+        {
+            TranscriptPanel.Visibility = Visibility.Collapsed;
+            TranscriptButton.IsChecked = false;
+            return;
+        }
+
         if (CommentsPanel.Visibility == Visibility.Visible)
         {
             if (repliesParent is not null) CloseReplies();
@@ -2154,6 +2373,40 @@ public sealed partial class PlayerPage : Page
     /// exact reason instead of it arriving wrapped as "Manifest write failed: ...".
     private sealed class InvalidManifestVariantException()
         : Exception("Manifest variant URI not absolute https.");
+}
+
+/// One transcript line as the panel's ListView shows it: the cue, a pre-formatted time, the
+/// query it was filtered by (for match highlighting), and the mutable active flag that tracks
+/// playback. Same VM-over-record split as CommentRowViewModel below.
+public sealed class TranscriptRowViewModel(TranscriptCue cue, string timeText, string query)
+    : System.ComponentModel.INotifyPropertyChanged
+{
+    private static readonly Brush ActiveBrush =
+        new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF));
+    private static readonly Brush InactiveBrush =
+        new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+
+    public TranscriptCue Cue { get; } = cue;
+    public string TimeText { get; } = timeText;
+    public string Text => Cue.Text;
+    public string Query { get; } = query;
+
+    private bool isActive;
+    public bool IsActive
+    {
+        get => isActive;
+        set
+        {
+            if (isActive == value) return;
+            isActive = value;
+            PropertyChanged?.Invoke(this,
+                new System.ComponentModel.PropertyChangedEventArgs(nameof(RowBackground)));
+        }
+    }
+
+    public Brush RowBackground => isActive ? ActiveBrush : InactiveBrush;
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 }
 
 /// Mutable per-row state for one comments-panel entry: a normal comment/reply row, the pinned

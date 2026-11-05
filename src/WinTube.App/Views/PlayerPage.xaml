@@ -11,6 +11,10 @@
         <KeyboardAccelerator Key="Right" Invoked="OnRightAccelerator"/>
         <KeyboardAccelerator Key="Left" Modifiers="Control" Invoked="OnChapterBackAccelerator"/>
         <KeyboardAccelerator Key="Right" Modifiers="Control" Invoked="OnChapterForwardAccelerator"/>
+        <!-- Ctrl+F opens the transcript panel with the search box focused. MainWindow's own
+             Ctrl+F (global search) no-ops on this page — its bar is collapsed — and leaves
+             the event unhandled, so this one gets it. -->
+        <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnTranscriptFindAccelerator"/>
     </Page.KeyboardAccelerators>
     <Grid RowDefinitions="Auto,*" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid x:Name="TitleRow" Grid.Row="0" Padding="12,8" ColumnDefinitions="*,Auto">
@@ -107,7 +111,7 @@
                         </StackPanel>
                     </Border>
                 </Canvas>
-                <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                     <Button x:Name="PlayPauseButton" Grid.Column="0" Click="OnPlayPauseClick"
                             Background="Transparent" BorderThickness="0">
                         <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE769;" FontSize="16"/>
@@ -172,7 +176,16 @@
                         <FontIcon Glyph="&#xE7F6;" FontSize="16"/>
                         <DropDownButton.Flyout><MenuFlyout x:Name="AudioFlyout"/></DropDownButton.Flyout>
                     </DropDownButton>
-                    <Button x:Name="FullScreenButton" Grid.Column="10" Click="OnFullScreenClick"
+                    <!-- Transcript: Collapsed until a stream with caption tracks has resolved
+                         (same gate as the CC picker). Bar only, like CC, so fullscreen has it. -->
+                    <ToggleButton x:Name="TranscriptButton" Grid.Column="10" Click="OnToggleTranscript"
+                                  Visibility="Collapsed" VerticalAlignment="Center"
+                                  Background="Transparent" BorderThickness="0" Margin="0,0,4,0"
+                                  ToolTipService.ToolTip="Transcript"
+                                  AutomationProperties.Name="Transcript">
+                        <FontIcon Glyph="&#xE8A5;" FontSize="16"/>
+                    </ToggleButton>
+                    <Button x:Name="FullScreenButton" Grid.Column="11" Click="OnFullScreenClick"
                             Background="Transparent" BorderThickness="0">
                         <FontIcon x:Name="FullScreenIcon" Glyph="&#xE740;" FontSize="16"/>
                     </Button>
@@ -189,6 +202,55 @@
                            HorizontalAlignment="Center"/>
                 <Button Content="Back" Click="OnBack" HorizontalAlignment="Center"/>
             </StackPanel>
+
+            <!-- Transcript panel: same slot and styling as CommentsPanel (mutual exclusion in
+                 OnToggleTranscript/OnToggleComments). Search filters the cue list as you type;
+                 matches are highlighted via TextHighlighters applied in OnTranscriptTextContext. -->
+            <Grid x:Name="TranscriptPanel" Width="400" HorizontalAlignment="Right"
+                  Visibility="Collapsed" Background="#D9141414" Tapped="OnTranscriptPanelTapped">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Padding="16,12" ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="TRANSCRIPT"
+                               VerticalAlignment="Center" CharacterSpacing="60" FontSize="13"/>
+                    <Button Grid.Column="1" Content="&#xE711;"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}" Click="OnToggleTranscript"/>
+                </Grid>
+                <Grid Grid.Row="1" Padding="16,0,16,12" ColumnDefinitions="*,Auto,Auto">
+                    <TextBox x:Name="TranscriptSearch" Grid.Column="0"
+                             PlaceholderText="Search transcript"
+                             TextChanged="OnTranscriptSearchChanged"/>
+                    <Button x:Name="TranscriptClearButton" Grid.Column="1" Content="&#xE711;"
+                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                            Visibility="Collapsed" Margin="4,0,0,0"
+                            ToolTipService.ToolTip="Clear search"
+                            AutomationProperties.Name="Clear search"
+                            Click="OnTranscriptSearchClear"/>
+                    <TextBlock x:Name="TranscriptHitCount" Grid.Column="2" Margin="8,0,0,0"
+                               VerticalAlignment="Center" FontSize="12"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                </Grid>
+                <TextBlock x:Name="TranscriptStatus" Grid.Row="2" Margin="16,8"
+                           TextWrapping="Wrap" Visibility="Collapsed"/>
+                <ListView x:Name="TranscriptList" Grid.Row="2" SelectionMode="None"
+                          IsItemClickEnabled="True" ItemClick="OnTranscriptCueClicked"
+                          ItemsSource="{x:Bind transcriptRows}">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:TranscriptRowViewModel">
+                            <Grid Padding="4,6" ColumnDefinitions="48,*"
+                                  Background="{x:Bind RowBackground, Mode=OneWay}" CornerRadius="4">
+                                <TextBlock Grid.Column="0" Text="{x:Bind TimeText}" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <TextBlock Grid.Column="1" Text="{x:Bind Text}" TextWrapping="Wrap"
+                                           FontSize="13" DataContextChanged="OnTranscriptTextContext"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
 
             <Grid x:Name="CommentsPanel" Width="400" HorizontalAlignment="Right"
                   Visibility="Collapsed" Background="#D9141414" Tapped="OnCommentsPanelTapped">

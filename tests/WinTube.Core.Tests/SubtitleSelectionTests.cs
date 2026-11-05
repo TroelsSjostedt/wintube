@@ -275,4 +275,40 @@ public class SubtitleSelectionTests
     {
         Assert.Equal(SubtitleMode.Off, SubtitleMuteMachine.OnManualPick(true));
     }
+
+    [Fact]
+    public void ChooseForTranscript_PrefersTheSavedSubtitleLanguage()
+    {
+        var tracks = new List<CaptionTrack>
+        {
+            new("https://t?lang=fr", "fr", "French", false),
+            new("https://t?lang=da", "da", "Danish", false),
+        };
+        var choice = SubtitleSelection.ChooseForTranscript(tracks, "da", "fr");
+        Assert.Equal("da", choice!.Language);
+    }
+
+    [Fact]
+    public void ChooseForTranscript_FallsBackToTheAudioLanguage()
+    {
+        var tracks = new List<CaptionTrack>
+        {
+            new("https://t?lang=fr", "fr", "French", false),
+            new("https://t?lang=da", "da", "Danish", false),
+        };
+        Assert.Equal("fr", SubtitleSelection.ChooseForTranscript(tracks, null, "fr")!.Language);
+        Assert.Equal("fr", SubtitleSelection.ChooseForTranscript(tracks, "sv", "fr")!.Language);
+    }
+
+    [Fact]
+    public void ChooseForTranscript_ReturnsNull_WhenNeitherLanguageMatches()
+    {
+        var tracks = new List<CaptionTrack>
+        {
+            new("https://t?lang=fr", "fr", "French", false),
+            new("https://t?lang=da", "da", "Danish", false),
+        };
+        Assert.Null(SubtitleSelection.ChooseForTranscript(tracks, null, "ja"));
+        Assert.Null(SubtitleSelection.ChooseForTranscript(tracks, null, null));
+    }
 }
